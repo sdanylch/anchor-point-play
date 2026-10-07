@@ -237,6 +237,19 @@ canvas#floor{display:block;width:100%;height:230px}
 .placing{display:flex;gap:14px;align-items:center}
 .place{font-family:var(--display);font-weight:800;font-size:3.2rem;line-height:1;color:var(--accent)}
 .place.p1{color:var(--gold)}.place.p2{color:var(--silver)}.place.p3{color:var(--bronze)}
+/* Awards countdown (v57): placings read out from last to first */
+.awl{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.awl li{display:grid;grid-template-columns:46px 1fr;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:.88rem;opacity:0;transform:translateY(6px);animation:awIn .45s ease forwards;animation-delay:var(--d,0s)}
+.awl li .pl{font-family:var(--display);font-weight:800;font-size:1.05rem}
+.awl li.me{border-width:2px;font-weight:700}
+.awl li.me.p1{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 16%,var(--surface))}
+.awl li.me.p2{border-color:var(--silver);background:color-mix(in srgb,var(--silver) 16%,var(--surface))}
+.awl li.me.p3{border-color:var(--bronze);background:color-mix(in srgb,var(--bronze) 16%,var(--surface))}
+.rtag.you{color:var(--ink);border-color:var(--ink)}
+.awl li.p1 .pl{color:var(--gold)}.awl li.p2 .pl{color:var(--silver)}.awl li.p3 .pl{color:var(--bronze)}
+.aw-after{opacity:0;animation:awIn .45s ease forwards;animation-delay:var(--d,0s)}
+@keyframes awIn{to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.awl li,.aw-after{animation:none;opacity:1;transform:none}}
 .tablewrap{overflow-x:auto;margin-inline:-4px}
 table{border-collapse:collapse;width:100%;font-size:.84rem}
 th,td{padding:7px 6px;text-align:center;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -691,12 +704,25 @@ const Engine = (() => {
     { id: 'traitor', text: 'Tyrone was seen at breakfast with {n}. Traitor!', rival: true },
     { id: 'sequins', text: 'Tyrone is wearing sequins now. Nobody knows where he got them.' },
   ];
+  // When each sighting lands in the weekend (Steve, v57): the slot it belongs to, and whether it shows once that slot
+  // is over (`after`: the workshop, the DJ booth, the final) or as it starts (breakfast, dressing up on Saturday night).
+  const TY_WHEN = {
+    workshop: { ok: sl => !sl.round && !sl.night && !sl.strictly, after: true },
+    dj: { ok: sl => sl.night && sl.t !== 'Sun night', after: true },
+    bib: { ok: sl => sl.round === 'Final', after: true },
+    traitor: { ok: sl => /^(Sat morning|Sun morning|Sun)$/.test(sl.t), after: false },
+    sequins: { ok: sl => sl.t === 'Sat night', after: false },
+  };
+  function tyroneWhen(slots, id, cur) {
+    const w = TY_WHEN[id], i = pick(slots.map((sl, k) => k).filter(k => k >= cur && w.ok(slots[k])));
+    return i === undefined ? { show: cur, when: '' } : { show: i + (w.after ? 1 : 0), when: slots[i].t };
+  }
   const PRANKED = [
-    { text: 'Someone paired their phone with the Bluetooth speaker in your room and played fast blues at 6 a.m.', energy: 4 },
-    { text: 'Someone switched your phone\u2019s language to Finnish. Your alarm went off, and you couldn\u2019t work out how to stop it.' },
-    { text: 'Your suitcase was zip-tied shut. Twelve zip ties. Good luck getting that open!' },
-    { text: 'You came back to a floor covered in paper cups of water, wall to wall. It took twenty minutes to reach your bed.', energy: 3 },
-    { text: 'Your bib was swapped for a hand-drawn one that says \u201c#1 DIVA\u201d. Your real one was found hidden underneath.' },
+    { text: 'Someone paired their phone with the Bluetooth speaker in your room and played fast blues at 6 a.m.', short: 'fast blues on your speaker at 6 a.m.', energy: 4 },
+    { text: 'Someone switched your phone\u2019s language to Finnish. Your alarm went off, and you couldn\u2019t work out how to stop it.', short: 'your phone switched to Finnish' },
+    { text: 'Your suitcase was zip-tied shut. Twelve zip ties. Good luck getting that open!', short: 'your suitcase zip-tied shut' },
+    { text: 'You came back to a floor covered in paper cups of water, wall to wall. It took twenty minutes to reach your bed.', short: 'a floor of paper cups of water', energy: 3 },
+    { text: 'Your bib was swapped for a hand-drawn one that says \u201c#1 DIVA\u201d. After searching everywhere, you found your real bib hidden underneath the gag bib.', short: 'the \u201c#1 DIVA\u201d bib' },
   ];
   const SOCIAL_FLAVOR = ['Eleven songs at the Friday social. Your feet hurt in a good way.',
     'A midnight blues set taught you more about connection than any class.',
@@ -1447,8 +1473,20 @@ const Engine = (() => {
   const VISIT = { tier: 4, Novice: { share: .1, from: .6, to: .98 }, Intermediate: { share: .45, from: .8, to: 1, extra: 12 } }; // v54: the best of a bigger region (up to +12 above)
   const sceneDancer = d => ({ id: d.id, name: d.name, bib: bib(), stats: dancerStats(d), strong: d.strong, ...(d.rival ? { rival: true } : {}) });
   // Every dance with someone from the scene is remembered: familiarity builds across the season.
-  function meet(s, p, where) { if (p.id === undefined) return; s.met = s.met || {}; s.met[p.id] = [...(s.met[p.id] || []), where]; }
+  function meet(s, p, where) {
+    if (p.id === undefined) return; s.met = s.met || {}; s.met[p.id] = [...(s.met[p.id] || []), where];
+    if (p.id === 'priya' || (s.open || {})[p.id] || !isOpen(s, p)) return;
+    s.open = s.open || {}; s.open[p.id] = { name: p.name, at: absWeek(s) }; // open to a Strictly with you now
+    const wk = s.wk; if (!wk || wk.finished) return;
+    wk.openNow = [...(wk.openNow || []), p.name];
+    const n = wk.news.find(x => x.open), text = `${listNames(wk.openNow)} ${wk.openNow.length > 1 ? 'are' : 'is'} open to doing a Strictly with you.`;
+    if (n) n.text = text; else wk.news.push({ tone: 'good', tag: 'Strictly', open: true, text });
+  }
   const metWhere = (s, p) => (p.id === undefined ? [] : (s.met || {})[p.id] || []);
+  const listNames = a => a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : a[0] || '';
+  // How many dances together before someone is open to a Strictly with you (hidden, 2-5, usually 2-3).
+  const openAt = (s, id) => { s.openAt = s.openAt || {}; if (s.openAt[id] === undefined) s.openAt[id] = pick(STRICTLY.open); return s.openAt[id]; };
+  const isOpen = (s, p) => p.id !== undefined && metWhere(s, p).length >= openAt(s, p.id);
   const PRELIM_W = { time: .24, tech: .24, conn: .24, mus: .16, comp: .12 };
   // How much a heat comes down to the day: judges disagree, partners vary, a song suits you. Scales the random
   // part of prelim and semifinal scores (yours is softened by Composure).
@@ -1633,16 +1671,18 @@ const Engine = (() => {
       others, otherSemi: otherSemi && otherSemi.map(c => c.id), otherRounds, partners, heat: {}, spotlight: rnd() < spotChance(ev.div), direct,
       pool: direct ? [{ isPlayer: true }, ...rivals] : null }; // straight to the final: everyone's in it
     const plan = direct
-      ? [['Fri night', null, true], ['Sat morning'], ['Sat afternoon'], ['Sat night', 'Final'], ['Sun'], ['Sun night', null, true]]
+      ? [['Fri night', null, true], ['Sat morning'], ['Sat afternoon'], ['Sat night', 'Final'], ['Sat late night', null, true], ['Sun'], ['Sun night', null, true]]
       : semi
       ? [['Fri night', null, true], ['Sat morning', 'Prelims'], ['Sat midday'], ['Sat afternoon', 'Semifinal'], ['Sat night', null, true], ['Sun morning'], ['Sun afternoon', 'Final'], ['Sun night', null, true]]
-      : [['Fri night', null, true], ['Sat morning', 'Prelims'], ['Sat afternoon'], ['Sat night', 'Final'], ['Sun'], ['Sun night', null, true]];
+      : [['Fri night', null, true], ['Sat morning', 'Prelims'], ['Sat afternoon'], ['Sat night', 'Final'], ['Sat late night', null, true], ['Sun'], ['Sun night', null, true]];
     const slots = plan.map(([t, round, night]) => ({ t, round: round || null, night: !!night, topic: pick(STATS), done: false }));
     slots.forEach(sl => { sl.topicName = pick(CLASS_TOPICS[sl.topic]); });
+    const sx = ev.tier >= STRICTLY.tier ? slots.findIndex(sl => sl.t === 'Sun' || sl.t === 'Sun morning') : -1; // Strictly is on Sunday
+    if (sx >= 0) slots[sx].strictly = true;
     const pro = { name: pick(PROS), topic: pick(STATS) };
     const news = [];
     if (res.spotlight) news.push({ tag: 'Spotlight', text: `This year the ${ev.div} final is a spotlight: one song, one couple at a time, the whole room watching. Composure counts double, and every judge sees every moment.` });
-    const freeBeforeRound = slots.findIndex((sl, i) => !sl.round && !sl.night && i > 1 && slots[i + 1] && slots[i + 1].round);
+    const freeBeforeRound = slots.findIndex((sl, i) => !sl.round && !sl.night && !sl.strictly && i > 1 && slots[i + 1] && slots[i + 1].round);
     if ((ev.rare || rnd() < .5) && freeBeforeRound > 0) {
       const sl = slots[freeBeforeRound]; sl.star = true; sl.rare = !!ev.rare; sl.topic = pro.topic; sl.topicName = pick(CLASS_TOPICS[pro.topic]);
       news.push({ tag: 'Star workshop', text: `${pro.name} is teaching ${LABEL[pro.topic].toLowerCase()} ${sl.t}, right before the ${slots[freeBeforeRound + 1].round.toLowerCase()}.` });
@@ -1650,11 +1690,11 @@ const Engine = (() => {
     res.priyaHere = others.some(c => c.priya); // in your division: her result comes from the rounds above
     res.priya = res.priyaHere ? null : priyaRoll(s, ev); // elsewhere: she competes in her own division
     if (res.priya && res.priya.final && s.priya.div !== ev.div && s.chem >= 1) {
-      const i = slots.findIndex(sl => !sl.round && sl.t !== 'Fri night' && !sl.star);
+      const i = slots.findIndex(sl => !sl.round && sl.t !== 'Fri night' && !sl.star && !sl.strictly);
       if (i >= 0) { slots[i].priya = true; news.push({ tag: named(s, '{priya}'), text: named(s, `{priya} made the ${s.priya.div} final, ${slots[i].t}. {priya:They}'d love you in the crowd.`) }); }
     } else if (s.priya.div === ev.div) news.push({ tag: named(s, '{priya}'), text: named(s, `{priya} is dancing ${ev.div} here too. You'll see how {priya:they} does on the ${s.role === 'Lead' ? 'follows' : 'leads'}' scoresheets.`) });
     if (rnd() < .35) {
-      const cand = slots.map((sl, i) => i).filter(i => !slots[i].round && !slots[i].night && !slots[i].star);
+      const cand = slots.map((sl, i) => i).filter(i => !slots[i].round && !slots[i].night && !slots[i].star && !slots[i].strictly);
       if (cand.length) { const i = pick(cand); slots[i].offer = true; news.push({ tag: 'Pro offer', text: `${pro.name} has a last-minute private slot ${slots[i].t}: $${WK.offerCost} instead of $${WK.privateCost}.` }); }
     }
     let cur = 0, roomie = null;
@@ -1686,8 +1726,8 @@ const Engine = (() => {
     let prankedBy = null;
     if (shared && rnd() < (pb ? MOOD.paybackChance : MOOD.prankChance)) { // someone from your community got you
       const pr = pick(PRANKED), nights = slots.map((sl, i) => i).filter(i => slots[i].night && i < slots.length - 1 && i >= cur);
-      const lead = pb ? (pb.by ? `Payback, courtesy of ${pb.by}: ` : `Payback from the room you got at ${pb.ev}: `) : '';
-      prankedBy = { at: nights.length ? nights[PRANKED.indexOf(pr) % nights.length] : -1, text: lead + (lead ? pr.text.charAt(0).toLowerCase() + pr.text.slice(1) : pr.text), energy: pr.energy || 0, payback: !!pb, done: false };
+      const lead = pb ? (pb.by ? `Payback, courtesy of ${pb.by}: ` : `Payback from the room you pranked at ${pb.ev}: `) : '';
+      prankedBy = { at: nights.length ? nights[PRANKED.indexOf(pr) % nights.length] : -1, text: lead + (lead ? pr.text.charAt(0).toLowerCase() + pr.text.slice(1) : pr.text), energy: pr.energy || 0, payback: !!pb, short: pr.short, from: pb ? pb.by || `the room you pranked at ${pb.ev}` : null, done: false };
     }
     const here = activeRivals(s).filter(d => d.div === ev.div ? rv.includes(d) : attends(s, ev, d)).map(d => d.id);
     // Tyrone turns up at your later events that season: one sighting each, ones you haven't seen first.
@@ -1695,10 +1735,11 @@ const Engine = (() => {
     if (s.tyrone && s.tyrone.season === (s.season || 1) && s.tyrone.ev !== ev.name) {
       const seen = s.tyroneSeen || [], ok = TYRONE.filter(t => !t.rival || here.length), fresh = ok.filter(t => !seen.includes(t.id));
       const t = pick(fresh.length ? fresh : ok), who = t.rival && s.rivalry[here[0]] ? s.rivalry[here[0]].name : '';
-      tyrone = { id: t.id, text: t.text.replace('{n}', who) }; s.tyrone.sightings++;
+      tyrone = { id: t.id, text: t.text.replace('{n}', who), ...tyroneWhen(slots, t.id, cur) }; s.tyrone.sightings++;
       s.tyroneSeen = fresh.length ? [...seen, t.id] : [t.id];
     }
-    s.wk = { res, slots, cur, pro, news, privUsed: false, single: !!opts.single, shared, pranked: false, prankedBy, here, tyrone, moods: wkMoods, snacks: 0, crash: false, start: { stats: { ...s.stats }, sc: s.sc, energy: s.energy, money: s.money }, finished: false };
+    const strictly = sx >= 0 ? strictlyAt(s, ev, slots[sx], sx, news) : null;
+    s.wk = { res, slots, cur, pro, news, strictly, awardsAt: slots.findIndex(sl => sl.t === 'Sun night'), awarded: false, privUsed: false, single: !!opts.single, shared, pranked: false, prankedBy, here, tyrone, moods: wkMoods, snacks: 0, crash: false, start: { stats: { ...s.stats }, sc: s.sc, energy: s.energy, money: s.money }, finished: false };
     if (prankedBy && prankedBy.at < 0) springPrank(s, true); // no night left (you got in late): it happens now
     return s.wk;
   }
@@ -1708,6 +1749,137 @@ const Engine = (() => {
     const wk = s.wk, p = wk && wk.prankedBy; if (!p || p.done || !(now || wk.cur > p.at)) return;
     p.done = true; p.when = wk.slots[wk.cur] ? wk.slots[wk.cur].t : ''; if (p.energy) s.energy = Math.max(0, s.energy - p.energy);
     moodShift(s, MOOD.pranked, 'getting pranked', wk.moods = wk.moods || []);
+  }
+  // Strictly Swing (Steve, v57): you choose your partner and dance every song together. From Novice. No Strictly at
+  // Tier 1; Tier 2-3 run one combined Novice/Intermediate Strictly, Tier 4 a separate one per division (a couple
+  // enters the higher partner's). It takes Sunday's daytime slot. Over 8 couples there's a prelim, then the final.
+  // Partners: {priya} at full chemistry (sometimes already entered with someone else), or anyone you've danced with
+  // enough that they're open to it. You pay your half of the entry; prizes are split. No WSDC points.
+  const STRICTLY = { tier: 2, chem: 3, busy: .4, open: [2, 2, 2, 2, 3, 3, 3, 4, 4, 5], show: 4,
+    fee: { 2: 40, 3: 50, 4: 70 }, prize: { 2: [80, 40, 20], 3: [120, 60, 30], 4: [200, 100, 50] }, couples: { 2: 7, 3: 12, 4: 13 },
+    top: .5, nov: .6, theirs: [6, 12], mood: 6, comp: 1 };
+  const DIVS_STRICTLY = ['Novice', 'Intermediate'];
+  function strictlyAt(s, ev, sl, at, news) {
+    const tier = ev.tier, st = { at, t: sl.t, tier, combined: tier < 4, fee: STRICTLY.fee[tier], prize: STRICTLY.prize[tier], size: STRICTLY.couples[tier], entered: null, result: null };
+    if (s.chem >= STRICTLY.chem && DIVS_STRICTLY.includes(s.priya.div) && rnd() < STRICTLY.busy) {
+      const pal = pick(s.field.filter(d => d.div === s.priya.div && !d.rival)); // whoever {priya} dances with is in your role
+      st.priyaBusy = pal ? pal.name : uniqueName(null, new Set(), genderFor(leadsIn(s, 'field'))); if (pal) st.priyaPal = pal.id;
+      news.push({ tag: 'Strictly', text: named(s, `{priya} already said yes to a Strictly with ${st.priyaBusy} this weekend. Next time.`) });
+    }
+    return st;
+  }
+  // Who you could dance this weekend's Strictly with, best fit first.
+  function strictlyPartners(s) {
+    const wk = s.wk, st = wk && wk.strictly; if (!st) return [];
+    const out = [], ev = wk.res.ev;
+    if (s.chem >= STRICTLY.chem && !st.priyaBusy && DIVS_STRICTLY.includes(s.priya.div)) out.push({ id: 'priya', name: named(s, '{priya}'), priya: true, div: s.priya.div, bonus: FAMILIAR_CAP, word: 'You click', times: 0 });
+    const met = (wk.res.others || []).filter(p => !p.priya && isOpen(s, p)).map(p => {
+      const n = metWhere(s, p).length;
+      return { id: p.id, name: p.name, div: ev.div, bonus: Math.min(FAMILIAR_CAP, FAMILIAR * n), word: n >= 5 ? 'You click' : n >= 3 ? 'Good fit' : 'Still learning each other', times: n };
+    }).sort((a, b) => b.times - a.times);
+    return [...out, ...met].slice(0, STRICTLY.show + out.length);
+  }
+  const strictlyDiv = (st, p, ev) => st.combined ? 'Novice/Intermediate' : DIV_ORDER.indexOf(p.div) > DIV_ORDER.indexOf(ev.div) ? p.div : ev.div;
+  const strictlyOpen = s => { const wk = s.wk, st = wk && wk.strictly; return !!st && !st.entered && !wk.finished && wk.cur <= st.at && !wk.slots[st.at].done; };
+  function enterStrictly(s, id) {
+    const wk = s.wk, st = wk && wk.strictly; if (!strictlyOpen(s)) return false;
+    const p = strictlyPartners(s).find(x => String(x.id) === String(id)), half = st && st.fee / 2;
+    if (!p || half > spare(s)) return false;
+    s.money -= half; st.paid = half;
+    const o = p.priya ? priyaDancer(s) : wk.res.others.find(x => x.id === p.id);
+    st.entered = { ...p, stats: { ...o.stats }, strong: o.strong, div: strictlyDiv(st, p, wk.res.ev) };
+    wk.slots[st.at].round = 'Strictly';
+    return true;
+  }
+  // The other couples: two dancers from the scene who chose each other (they know each other's dancing too).
+  // The other couples: two dancers from the scene who chose each other (they know each other's dancing too). Rivals at
+  // the event can enter; so can {priya}, when she's dancing it with someone else (Steve, v57). `div` = which Strictly.
+  function strictlyField(s, st, n, div0) {
+    // Strictly draws the keen ones: couples come from the top `STRICTLY.top` of each division.
+    const keen = l => DIVS_STRICTLY.flatMap(dv => { const x = l.filter(d => d.div === dv).sort((a, b) => b.skill - a.skill); return x.slice(0, Math.ceil(x.length * STRICTLY.top)); });
+    const here = new Set((s.wk && s.wk.here) || []), skip = st.entered ? st.entered.id : null;
+    const mine = shuffle(keen(s.field.filter(d => (!d.rival || here.has(d.id)) && d.id !== st.priyaPal))), theirs = shuffle(keen(s.scene.filter(d => d.id !== skip)));
+    const tag = d => ({ name: d.name, ...(d.rival ? { rival: true } : {}), ...(d.priya ? { priya: true } : {}) });
+    const couple = (a, b, div) => { // a is in your role, b in the other
+      const cs = coupleStats(a, b); cs.conn = Math.min(STAT_MAX, cs.conn + rand(...STRICTLY.theirs));
+      const lead = s.role === 'Lead' ? a : b, follow = s.role === 'Lead' ? b : a;
+      return { name: `${lead.name} & ${follow.name}`, lead: tag(lead), follow: tag(follow), bib: bib(), stats: cs, div, ...(a.rival ? { rival: true } : {}), ...(b.priya ? { priya: true } : {}) };
+    };
+    const out = [], pd = s.priya && s.priya.div, pal = st.priyaPal !== undefined && s.field.find(d => d.id === st.priyaPal);
+    if (pal && (st.combined || pd === div0)) out.push(couple({ ...sceneDancer(pal), rival: false }, priyaDancer(s), pd));
+    while (out.length < n) {
+      const div = st.combined ? (rnd() < STRICTLY.nov ? 'Novice' : 'Intermediate') : div0;
+      const take = (l, mean) => { const k = l.findIndex(d => d.div === div); return k >= 0 ? sceneDancer(l.splice(k, 1)[0]) : makeNPC(mean); };
+      out.push(couple(take(mine, POP[div].level), take(theirs, POP[div].level), div));
+    }
+    return shuffle(out);
+  }
+  // The Strictly runs whether or not you entered (Steve, v57): at the awards you hear who won, and the sheet goes up.
+  function strictlyWatch(s) {
+    const wk = s.wk, st = wk && wk.strictly; if (!st || st.entered || st.watch) return;
+    const ev = wk.res.ev, field = strictlyField(s, st, st.size, ev.div);
+    let pool = field, prelim = null;
+    if (field.length > 8) { const pr = cutRound('Strictly prelims', 'Final', field, 8, c => weighted(c.stats, PRELIM_W) + gauss() * 4 * LUCK * PRE_SHARED); prelim = pr.info; pool = pr.advancers; }
+    const songs = songSet(), w = {}; STATS.forEach(k => w[k] = songs.reduce((a, so) => a + songW(so)[k], 0) / songs.length);
+    const couples = pool.map(c => ({ ...c, base: weighted(c.stats, w) }));
+    const fm = {}; STATS.forEach(k => fm[k] = couples.reduce((a, c) => a + c.stats[k], 0) / couples.length);
+    const { ranks, order } = judgeCouples(couples, [], fm, 1, JUDGING.floor);
+    st.watch = { label: st.combined ? 'Novice/Intermediate' : ev.div, size: field.length, prelim,
+      table: order.map((i, k) => ({ place: k + 1, ranks: ranks[i], why: order.why[i], lead: { ...couples[i].lead, bib: couples[i].bib }, follow: { ...couples[i].follow, bib: couples[i].bib } })) };
+    if (st.priyaBusy && !field.some(c => c.priya) && POP[s.priya.div]) { // {priya} danced the other division's Strictly
+      const r = rollAt(s.scene.filter(d => d.div === s.priya.div), s.priya.skill + 4, STRICTLY.couples[st.tier]);
+      st.watch.priya = { div: s.priya.div, place: r.final ? r.place : null };
+    }
+  }
+  // Two steps in the same Sunday block (Steve, v57): the prelims (over 8 couples), then, if you're called back, the final.
+  function danceStrictly(s) {
+    const wk = s.wk, st = wk.strictly, p = st.entered, ef = energyFactor(s.energy);
+    const floor = { ...s.stats }; if (s.gear.outfit) floor.comp = Math.min(STAT_MAX, floor.comp + 6);
+    const cs = coupleStats({ stats: floor }, { stats: p.stats }); cs.conn = Math.min(STAT_MAX, cs.conn + p.bonus);
+    const you = { name: s.name }, pt = { name: p.name, ...(p.priya ? { priya: true } : {}) };
+    const me = { name: `${s.name} & ${p.name}`, lead: s.role === 'Lead' ? you : pt, follow: s.role === 'Lead' ? pt : you, bib: s.bib, stats: cs, isPlayer: true, div: p.div };
+    const r = st.result = st.result || { size: st.size, label: p.div, partner: p.name, priya: !!p.priya, out: false, done: false, energy: 0 };
+    const spend = n => { s.energy = Math.max(0, s.energy - n); r.energy += n; if (wk.crash) { s.energy = Math.max(0, s.energy - 20); wk.crash = false; wk.crashed = true; } };
+    if (!st.pool) {
+      const field = [me, ...strictlyField(s, st, st.size - 1, p.div)];
+      if (field.length > 8) {
+        const pr = cutRound('Strictly prelims', 'Final', field, 8, c => weighted(c.stats, PRELIM_W) * (c.isPlayer ? ef : 1) + gauss() * 4 * LUCK * PRE_SHARED * (c.isPlayer ? Math.max(.2, 1 - c.stats.comp / 150) : 1));
+        r.prelim = pr.info; spend(ROUND_ENERGY.Prelims);
+        if (!pr.info.advanced) { Object.assign(r, { out: true, rank: pr.info.rank }); return endStrictly(s); }
+        st.pool = pr.advancers.map(c => c.isPlayer ? { isPlayer: true } : c);
+        return { round: 'Strictly', stage: 'prelim', advanced: true, rank: pr.info.rank, size: field.length };
+      }
+      st.pool = field.map(c => c.isPlayer ? { isPlayer: true } : c);
+    }
+    const songs = songSet(), w = {}; STATS.forEach(k => w[k] = songs.reduce((a, so) => a + songW(so)[k], 0) / songs.length);
+    const couples = st.pool.map(c => ({ ...(c.isPlayer ? me : c), base: weighted((c.isPlayer ? me : c).stats, w) }));
+    const fm = {}; STATS.forEach(k => fm[k] = couples.reduce((a, c) => a + c.stats[k], 0) / couples.length);
+    const pc = couples.find(c => c.isPlayer), moments = [];
+    for (let i = 0; i < 6; i++) {
+      const si = Math.floor(i / 2), stt = i === 5 ? 'comp' : weightedPick(songW(songs[si])), mine = pc.stats[stt] * (stt === 'comp' ? 1 : ef);
+      const ok = rnd() < sigmoid((mine - fm[stt]) / 5);
+      moments.push({ stat: stt, ok, text: pick(PHRASES[stt][ok ? 'good' : 'bad']), song: si });
+    }
+    const { ranks, order } = judgeCouples(couples, moments, fm, ef, JUDGING.floor);
+    const mineK = {}; STATS.forEach(k => mineK[k] = pc.stats[k] * (k === 'comp' ? 1 : ef));
+    const place = order.indexOf(couples.indexOf(pc)) + 1, prize = Math.round((st.prize[place - 1] || 0) / 2);
+    Object.assign(r, { place, prize, songs, moments, fit: songs.map(so => songFit(songW(so), mineK, fm)),
+      table: order.map((i, k) => ({ place: k + 1, isPlayer: !!couples[i].isPlayer, ranks: ranks[i], why: order.why[i], lead: { ...couples[i].lead, bib: couples[i].bib }, follow: { ...couples[i].follow, bib: couples[i].bib } })) });
+    r.pending = true; // handed out at the awards
+    spend(ROUND_ENERGY.Final);
+    return endStrictly(s);
+  }
+  function endStrictly(s) {
+    const wk = s.wk, sl = wk.slots[wk.cur], st = wk.strictly, r = st.result, p = st.entered;
+    r.done = true; r.moods = [];
+    moodShift(s, STRICTLY.mood, `dancing the Strictly with ${p.name}`, r.moods);
+    (wk.moods = wk.moods || []).push(...r.moods);
+    r.d = {}; gain(s, 'comp', STRICTLY.comp, true, r.d);
+    if (!p.priya) meet(s, p, `${wk.res.ev.name} Strictly`);
+    st.pool = null;
+    sl.done = true; sl.result = { round: 'Strictly', info: { strictly: true }, place: r.place, out: r.out, rank: r.rank, size: r.size, prize: r.prize || 0, partner: p.name };
+    wk.cur++; springPrank(s);
+    return sl.result;
   }
   // You can only nap so much: each daytime rest this weekend gives less (full, half, then a quarter).
   const napsBefore = (wk, i) => wk.slots.slice(0, i).filter(x => x.choice === 'rest' && !x.night).length; // a night's sleep isn't a nap
@@ -1742,12 +1914,15 @@ const Engine = (() => {
       }
     }
     if (sl.priya) opt('cheerPriya', named(s, `Cheer {priya}'s ${s.priya.div} final`), s.chem >= 3 ? 'Community +8.' : 'Community +8 and chemistry +1.', 0, WK.cheerPriya.energy);
-    const naps = napsBefore(wk, i), restGain = Math.round((wk.single ? 20 : -WK.rest.energy) * NAP[Math.min(NAP.length - 1, naps)]);
-    opt('rest', 'Rest at the hotel', naps ? `You've already rested ${naps === 1 ? 'once' : naps + ' times'} this weekend. Another nap only gives +${restGain} energy.` : `Nap, stretch, eat something real. +${restGain} energy.`, 0, -restGain);
+    // A night in bed is a full night's sleep, whatever naps came before (v57); daytime naps shrink.
+    const naps = sl.night ? 0 : napsBefore(wk, i), restGain = Math.round((wk.single ? 20 : -WK.rest.energy) * NAP[Math.min(NAP.length - 1, naps)]);
+    if (sl.night) opt('rest', 'Go to bed', `Skip the social and sleep properly. +${restGain} energy.`, 0, -restGain);
+    else opt('rest', 'Rest at the hotel', naps ? `You've already rested ${naps === 1 ? 'once' : naps + ' times'} this weekend. Another nap only gives +${restGain} energy.` : `Nap, stretch, eat something real. +${restGain} energy.`, 0, -restGain);
     return o;
   }
 
   function chooseSlot(s, optId) {
+    if (awardsDue(s)) awards(s);
     const wk = s.wk, sl = wk.slots[wk.cur];
     const o = slotOptions(s, wk.cur).find(x => x.id === optId);
     if (!o || !o.ok) return null;
@@ -1787,10 +1962,13 @@ const Engine = (() => {
       }
       wk.prank = { id: pr.id, short: pr.short, react: pick(pr.react), rival };
       s.payback = { at: absWeek(s), ev: wk.res.ev.name, by };
-      if (pr.id === 'ducks') s.tyrone = { season, ev: wk.res.ev.name, sightings: 0 };
+      if (pr.id === 'ducks') { // the note comes under your door the morning after that night
+        s.tyrone = { season, ev: wk.res.ev.name, sightings: 0 };
+        const n = wk.slots.findIndex((x, k) => k > wk.cur && x.night); wk.tyroneNote = n < 0 ? wk.slots.length : n + 1;
+      }
       moodShift(s, MOOD.prank, 'the prank', wk.moods = wk.moods || []);
     }
-    else if (optId === 'rest') { note = napsBefore(wk, wk.cur) ? 'More lying around. It helps a little.' : 'A real nap. Your legs thank you.'; }
+    else if (optId === 'rest') { note = sl.night ? 'Early night. You slept properly.' : napsBefore(wk, wk.cur) ? 'More lying around. It helps a little.' : 'A real nap. Your legs thank you.'; }
     if (sl.snore) { s.energy = Math.max(0, s.energy - 10); note += ' Then the snoring started. −10 energy.'; o.energy += 10; }
     s.sc = clamp(s.sc + sc, 0, 100);
     sl.done = true; sl.choice = optId; sl.result = { title: o.title, d, sc, energy: -o.energy, money: o.money, note, met, moods: (wk.moods || []).slice(m0), prank: optId === 'prank' ? wk.prank : undefined };
@@ -1800,7 +1978,7 @@ const Engine = (() => {
 
   function markOut(s) {
     const wk = s.wk; wk.res.out = true;
-    wk.slots.forEach((sl, i) => { if (i >= wk.cur && sl.round) { sl.wasRound = sl.round; sl.round = null; sl.night = /night/i.test(sl.t); } });
+    wk.slots.forEach((sl, i) => { if (i >= wk.cur && sl.round && sl.round !== 'Strictly') { sl.wasRound = sl.round; sl.round = null; sl.night = /night/i.test(sl.t); } });
   }
 
   // Prelims and semis are three songs, and partners rotate each song. Everyone you dance with is "met".
@@ -1816,6 +1994,7 @@ const Engine = (() => {
     res.heat[round].forEach(p => meet(s, p, `${res.ev.name} ${round === 'Prelims' ? 'prelims' : 'semifinal'}`));
   }
   function danceRound(s) {
+    if (s.wk.slots[s.wk.cur].round === 'Strictly') return danceStrictly(s);
     const wk = s.wk, sl = wk.slots[wk.cur], res = wk.res, ev = res.ev;
     const ef = energyFactor(s.energy);
     const floor = { ...s.stats }; if (s.gear.outfit) floor.comp = Math.min(STAT_MAX, floor.comp + 6);
@@ -1870,6 +2049,20 @@ const Engine = (() => {
   // Judging a final: the chance a judge catches any one moment, what it's worth, and the rest of their noise.
   // Each moment is worth `see` × `hit` on average (~1.1–1.2, as before), so mostly the spread changes (Steve, v43).
   const JUDGING = { floor: { see: .3, hit: 7, noise: 7 }, spot: { see: 1, hit: 1.1, noise: 1.2 } }; // v45: mid-pack consensus (5,5,5,6,5) ~3%
+  function judgeCouples(couples, moments, fm, ef, J) {
+    const meanBase = couples.reduce((a, c) => a + c.base, 0) / couples.length;
+    couples.forEach(c => {
+      c.moments = c.isPlayer ? moments.map(m => m.ok) : Array.from({ length: 6 }, () => rnd() < sigmoid((c.base - meanBase) / 12)); // a gentle tilt: better couples have more good moments
+      c.perf = c.isPlayer ? c.base * ef + gauss() * 3 * (1 - c.stats.comp / 150) : c.base + gauss() * 3.5;
+    });
+    const ranksByJudge = JUDGES.map(j => {
+      const sc = couples.map((c, i) => ({ i, v: c.perf + .12 * (c.stats[j.focus] - fm[j.focus]) + gauss() * J.noise
+        + c.moments.reduce((a, ok) => a + (rnd() < J.see ? (ok ? J.hit : -J.hit) : 0), 0) }));
+      sc.sort((x, y) => y.v - x.v); const r = []; sc.forEach((x, k) => r[x.i] = k + 1); return r;
+    });
+    const ranks = couples.map((_, i) => JUDGES.map((_, j) => ranksByJudge[j][i]));
+    return { ranks, order: relativePlacement(ranks) };
+  }
   function runFinal(s, res, me, ef) {
     const ev = res.ev;
     const pool = res.pool.map(c => c.isPlayer ? me : c);
@@ -1905,19 +2098,7 @@ const Engine = (() => {
     // from how they compare to the floor). On a full floor each judge catches only some of them, so a couple with
     // a mix of great and messy moments can get 1sts and 7ths, while a consistent couple gets consistent marks.
     // In a spotlight every judge sees every moment: the marks are tight.
-    const meanBase = couples.reduce((a, c) => a + c.base, 0) / couples.length;
-    couples.forEach(c => {
-      c.moments = c.isPlayer ? moments.map(m => m.ok) : Array.from({ length: 6 }, () => rnd() < sigmoid((c.base - meanBase) / 12)); // a gentle tilt: better couples have more good moments
-      c.perf = c.isPlayer ? c.base * ef + gauss() * 3 * (1 - c.stats.comp / 150) : c.base + gauss() * 3.5;
-    });
-    const J = spot ? JUDGING.spot : JUDGING.floor;
-    const ranksByJudge = JUDGES.map(j => {
-      const sc = couples.map((c, i) => ({ i, v: c.perf + .12 * (c.stats[j.focus] - fm[j.focus]) + gauss() * J.noise
-        + c.moments.reduce((a, ok) => a + (rnd() < J.see ? (ok ? J.hit : -J.hit) : 0), 0) }));
-      sc.sort((x, y) => y.v - x.v); const r = []; sc.forEach((x, k) => r[x.i] = k + 1); return r;
-    });
-    const ranks = couples.map((_, i) => JUDGES.map((_, j) => ranksByJudge[j][i]));
-    const order = relativePlacement(ranks);
+    const { ranks, order } = judgeCouples(couples, moments, fm, ef, spot ? JUDGING.spot : JUDGING.floor);
     const pIdx = couples.indexOf(pc);
     const place = order.indexOf(pIdx) + 1;
     const gap = STATS.reduce((a, k) => a + Math.max(0, s.stats[k] - pc.b.stats[k]), 0) / STATS.length;
@@ -1931,11 +2112,33 @@ const Engine = (() => {
         return { place: k + 1, isPlayer: c.isPlayer, ranks: ranks[i], why: order.why[i], lead: { name: lead.name, bib: lead.bib, rival: !!lead.rival, ...(lead.priya ? { priya: true } : {}) }, follow: { name: follow.name, bib: follow.bib, rival: !!follow.rival, ...(follow.priya ? { priya: true } : {}) } };
       }),
     });
-    s.points += res.points;
     const pz = (ev.prize || [])[place - 1] || 0;
-    res.prizePass = pz === 'pass'; if (res.prizePass) s.passes = (s.passes || 0) + 1; // a free pass to a future event
+    res.prizePass = pz === 'pass'; // a free pass to a future event
     res.prize = res.prizePass ? 0 : pz;
-    s.money += res.prize; s.winnings = (s.winnings || 0) + res.prize;
+    res.pending = true; // points and prizes are handed out at the awards ceremony (Steve, v57)
+  }
+  // Awards ceremony (Steve, v57): Sunday evening, before the last social, at every event. Final placings are read
+  // out here (J&J, then the Strictly); points, prize money and a Strictly win's motivation land here. Not a slot.
+  const awardsDue = s => { const wk = s.wk; return !!wk && wk.awardsAt >= 0 && !wk.awarded && wk.cur >= wk.awardsAt; };
+  function awards(s) {
+    const wk = s.wk; if (!wk) return; wk.awarded = true; // safe to call again: each prize is handed out once
+    const res = wk.res;
+    if (res.pending) {
+      res.pending = false; s.points += res.points;
+      if (res.prizePass) s.passes = (s.passes || 0) + 1;
+      s.money += res.prize; s.winnings = (s.winnings || 0) + res.prize;
+    }
+    if (!res.madeFinal && !res.winners && res.pool && res.partners) { // who won your division (you weren't in the final)
+      const top = l => l.map(c => ({ c, v: weighted(c.stats, PRELIM_W) + gauss() * 4 })).sort((a, b) => b.v - a.v)[0];
+      const a = top(res.pool.filter(c => !c.isPlayer)), b = top(res.partners);
+      if (a && b) res.winners = { lead: (s.role === 'Lead' ? a : b).c.name, follow: (s.role === 'Lead' ? b : a).c.name };
+    }
+    strictlyWatch(s);
+    const r = wk.strictly && wk.strictly.result;
+    if (r && r.pending) {
+      r.pending = false; s.money += r.prize; s.winnings = (s.winnings || 0) + r.prize;
+      if (r.place === 1) { const m = []; moodShift(s, MOOD.win, 'winning the Strictly', m); r.moods.push(...m); (wk.moods = wk.moods || []).push(...m); }
+    }
   }
 
   // Priya: your practice partner, a Novice a step ahead of you. She competes at every circuit event in her own
@@ -1985,7 +2188,8 @@ const Engine = (() => {
   }
   function exitOf(res) { return res.madeFinal ? null : res.rounds[res.rounds.length - 1]; }
   function finishEvent(s) {
-    const wk = s.wk; if (wk.finished) return wk.summary; wk.finished = true;
+    const wk = s.wk; if (wk.finished) return wk.summary;
+    awards(s); wk.finished = true;
     const res = wk.res;
     s.sc = Math.min(100, s.sc + SC.event);
     const b = s.stats.comp; s.stats.comp = Math.min(STAT_MAX, s.stats.comp + 2);
@@ -2003,14 +2207,15 @@ const Engine = (() => {
     if (beat) moodShift(s, MOOD.h2hWin, `beating ${beat.name}`, em); else if (lost) moodShift(s, -MOOD.h2hLoss, `losing to ${lost.name}`, em);
     const big = res.h2h.find(m => m.main && m.theyFinal && !m.iFinal);
     if (big) s.rivalNotes = [...(s.rivalNotes || []).slice(-8), { season: s.season || 1, week: s.week, text: big.say }];
-    s.history.push({ season: s.season || 1, div: res.ev.div || 'Novice', id: res.ev.id, week: res.week, name: res.ev.name, tier: res.ev.tier, madeFinal: res.madeFinal, place: res.place, points: res.points, prize: res.prize || 0, prizePass: !!res.prizePass, exit: ex ? { name: ex.name, rank: ex.rank, size: ex.size } : null, rivals: res.rivals ? rivalReport(res) : [], h2h: res.h2h, away: res.away || [] });
-    s.log.unshift({ season: s.season, week: s.week, text: res.ev.name + ': ' + (res.madeFinal ? ordinal(res.place) + ' in the final, +' + res.points + ' pts' : 'out in ' + ex.name.toLowerCase() + ' (' + ordinal(ex.rank) + ' of ' + ex.size + ')') });
+    s.history.push({ season: s.season || 1, div: res.ev.div || 'Novice', id: res.ev.id, week: res.week, name: res.ev.name, tier: res.ev.tier, madeFinal: res.madeFinal, place: res.place, points: res.points, prize: res.prize || 0, prizePass: !!res.prizePass, exit: ex ? { name: ex.name, rank: ex.rank, size: ex.size } : null, rivals: res.rivals ? rivalReport(res) : [], h2h: res.h2h, away: res.away || [],
+      ...(wk.strictly && wk.strictly.result ? { strictly: (r => ({ place: r.place || null, out: r.out, rank: r.rank, size: r.size, prize: r.prize || 0, partner: r.partner, priya: r.priya, div: r.label }))(wk.strictly.result) } : {}) });
+    s.log.unshift({ season: s.season, week: s.week, text: res.ev.name + ': ' + (res.madeFinal ? ordinal(res.place) + ' in the J&J final, +' + res.points + ' pts' : 'out in the J&J ' + ex.name.toLowerCase() + ' (' + ordinal(ex.rank) + ' of ' + ex.size + ')') });
     checkDoors(s);
     if (res.priyaHere) res.priya = priyaHere(s, res);
     if (res.priya) applyPriya(s, res.priya, res.ev);
     if (s.week >= WEEKS) endSeason(s);
     const d = {}; STATS.forEach(k => { const g = s.stats[k] - wk.start.stats[k]; if (g) d[k] = g; });
-    wk.summary = { d, moods: wk.moods || [], sc: Math.round(s.sc - wk.start.sc), energyStart: wk.start.energy, energyEnd: s.energy, spent: wk.start.money - s.money + (res.prize || 0) };
+    wk.summary = { d, moods: wk.moods || [], sc: Math.round(s.sc - wk.start.sc), energyStart: wk.start.energy, energyEnd: s.energy, spent: wk.start.money - s.money + (res.prize || 0) + (wk.strictly && wk.strictly.result ? wk.strictly.result.prize || 0 : 0) };
     return wk.summary;
   }
   function skipEvent(s) {
@@ -2098,7 +2303,7 @@ const Engine = (() => {
     return { kind, deltas, leak, read, note: kind === 'coach' ? LEAKS[leak] : null };
   }
 
-  return { R, STATS, LABEL, WEEKS, PROMO, INCOME, RECOVER, EVENTS, POINTS, GENRES, PRACTICE, named, knows, palOf, absWeek, MOOD, moodOf, moodWord, moodMult, planKey, planDiff, isSmug, VISIT, PRANKS, PRANKED, gainWord, LEVEL_WORDS, levelIn, readStat, feel, CLASS, SOCIAL, MOCK, PRIVATE_COST, PRIVATE_ENERGY, DISCOUNT, DEV_UNLOCK, SC, PRIVATE_COACH, JUDGES, SHORT, REVIEW,
+  return { R, STATS, awards, awardsDue, STRICTLY, strictlyPartners, strictlyOpen, enterStrictly, isOpen, LABEL, WEEKS, PROMO, INCOME, RECOVER, EVENTS, POINTS, GENRES, PRACTICE, named, knows, palOf, absWeek, MOOD, moodOf, moodWord, moodMult, planKey, planDiff, isSmug, VISIT, PRANKS, PRANKED, gainWord, LEVEL_WORDS, levelIn, readStat, feel, CLASS, SOCIAL, MOCK, PRIVATE_COST, PRIVATE_ENERGY, DISCOUNT, DEV_UNLOCK, SC, PRIVATE_COACH, JUDGES, SHORT, REVIEW,
     newGame, resume, answerEvent, eventOk, emptyPlan, mockAvailable, socialAvailable, privatePrice, devMult, planCost, scGainOf, checkPlan, sanitizePlan, applyWeek, endWeek,
     weeklySpare, DOOR, doorPass, STORE, STORE_WK, gearState, buyGear, standState, buyStand, startEvent, slotOptions, chooseSlot, danceRound, finishEvent, skipEvent, reviewOptions, reviewBudget, buyReview, rescueFrac, exitOf, ordinal, LV, teach, levelOf, teachFrac, gainRange, eventAt, calendarOf, setGoing, nextEvent, priceOf, tierOf, SUGGESTED, LATE_WEEK, makeCalendar, CAREER, DIVS, entry, canMoveUp, moveUp, newSeason, door, STAT_MAX, relativePlacement, energyFactor, ROUND_ENERGY, WK, FAMILIAR, FAMILIAR_CAP, rollClass, CALLBACK, rivalReport, hasSemi, mockFor, spotChance, JUDGING, PRE_JUDGE, bookBy, upfrontOf, doorOf, canChange, spare, heldFor, dues, shortfall, keepFor, POP, rivalsOf, PRIYA, growPop, popTemplate, agePop,
     RIVAL_MAX, RIVAL_TYPES, RIVALRY, labelOf, preLine, describeRival, activeRivals, trackRival, pickMain, stopRival, attends, gapWord, standing, mySkill, skillOf, promoCandidates };
@@ -2413,6 +2618,7 @@ const TIPS = [
   { id: 'community', at: 'week', when: () => E.absWeek(S) >= 3, text: () => `Classes and socials build community. It gets you asked to practice and noticed by pros.` },
   { id: 'rivals', at: 'week', when: () => E.absWeek(S) >= 5, text: () => `Your <b>Rivals</b> tab keeps score: at every event you both dance, whoever gets further wins the head-to-head.` },
   { id: 'weekend', at: 'weekend', when: () => true, text: () => `Naps shrink each time (+15, then +8, then +4), so save them for right before a round.` },
+  { id: 'strictly', at: 'weekend', when: () => E.strictlyOpen(S) && E.strictlyPartners(S).length > 0, text: () => `A Strictly is the one where you choose your partner. No points, but it's a lift, and the prize is split between you. Enter any time before Sunday.` },
   { id: 'out', at: 'weekend', when: () => S.wk && S.wk.res.out, text: () => `You're out, so the rest of the weekend is yours: workshops, a private with the visiting pro, socials with no round to save energy for.` },
 ];
 // Pop-up tips can be switched off (v56, Steve): per browser, from a tip or the help screen.
@@ -2435,7 +2641,8 @@ function helpRules() {
       <li><b>You never see your numbers.</b> Your bars compare your skills with each other, and the arrows show the last 4 weeks. Only a coach or a pro can tell you where a skill stands in your division: book a private or a coach's video review.</li>
       <li><b>Motivation</b> is your mind over the season. The same week again and again wears it down; socials, new people, good results and pranks lift it. Fired up, training lands better; burnt out, worse. Two wins in a row and you get complacent.</li>
       <li><b>Events:</b> pick them on the Season tab. Going means booked: at the deadline you pay the pass (and flight), with no refunds, and the rest at the event. Only finalists earn points, and bigger events pay more.</li>
-      <li><b>Finals</b> are a random partner and random songs. You don't pick the moves: the + and − moments show whether your training holds up. Anyone you dance with at a social or in a heat could be your partner in a final, and it helps to know them.</li>
+      <li><b>Finals</b> are a random partner and random songs. You don't pick the moves: the + and − moments show whether your training holds up. Anyone you dance with at a social or in a heat could be your partner in a final, and it helps to know them. Placings (and points and prizes) are read out at the awards ceremony on Sunday evening.</li>
+      <li><b>Strictly:</b> at bigger events (not Tier 1) there's a Strictly on Sunday, where you choose your partner: ${N('{priya}')} once your chemistry is full, or someone you've danced with enough that they're open to it (you'll hear when they are). You pay half the entry and split the prize. No WSDC points.</li>
       <li><b>Rivals:</b> your main rival starts a step ahead of you. At every event you both dance, whoever gets further wins the head-to-head. Others suggest themselves (up to ${E.RIVAL_MAX} at a time), and they follow you up the divisions.</li>
       <li><b>The circuit is alive.</b> Everyone improves, the best move up, and newcomers join. Early on a Novice final is a lucky break. Moving up a division puts you back near the bottom.</li>
       <li><b>Enjoy the ride.</b> In real life, pointing out of Novice often takes years. The dancing along the way is the good part.</li>
@@ -2565,7 +2772,7 @@ function doorNews(r) {
   return `You're on ${ptsNow()}.`;
 }
 // A season's events, one line each.
-const eventLines = hist => `<ul class="notes">${hist.map(h => `<li class="${h.points ? 'good' : 'bad'}"><span><b>${esc(h.name)}</b> (${h.div || 'Novice'}, T${h.tier}): ${h.skipped ? (h.broke ? `couldn\u2019t afford it${h.lost ? ` (lost $${h.lost})` : ''}` : 'skipped') : h.madeFinal ? `${E.ordinal(h.place)} in the final, +${h.points} pts${h.prize ? `, $${h.prize} prize` : ''}` : `out in ${h.exit.name.toLowerCase()}, ${E.ordinal(h.exit.rank)} of ${h.exit.size}`}</span></li>`).join('')}</ul>`;
+const eventLines = hist => `<ul class="notes">${hist.map(h => `<li class="${h.points ? 'good' : 'bad'}"><span><b>${esc(h.name)}</b> (${h.div || 'Novice'}, T${h.tier}): ${h.skipped ? (h.broke ? `couldn\u2019t afford it${h.lost ? ` (lost $${h.lost})` : ''}` : 'skipped') : h.madeFinal ? `J&amp;J ${E.ordinal(h.place)}, +${h.points} pts${h.prize ? `, $${h.prize} prize` : ''}` : `J&amp;J out in the ${h.exit.name.toLowerCase()}, ${E.ordinal(h.exit.rank)} of ${h.exit.size}`}${h.strictly ? `. Strictly with ${esc(h.strictly.partner)}: ${h.strictly.place ? E.ordinal(h.strictly.place) + (h.strictly.prize ? `, $${h.strictly.prize}` : '') : 'out in the prelims'}` : ''}</span></li>`).join('')}</ul>`;
 // Your couple against the average couple in a final, in words (hidden stats).
 const vsWord = d => d >= 8 ? 'well ahead' : d > 2 ? 'ahead' : d >= -2 ? 'even' : d > -8 ? 'behind' : 'well behind';
 // Growth per week, in words (hidden stats).
@@ -2642,9 +2849,12 @@ const songLabel = (r, i) => r.spotlight ? `Spotlight · ${r.songs[i].title} · $
 // How one song suits you: [css class, word] from the average edge on the two stats it rewards.
 const fitWord = e => e >= 3 ? ['good', 'In your favour'] : e <= -3 ? ['bad', 'Against you'] : ['', 'Even'];
 // A song as it starts: who, what it asks for, and how you stack up there. `couple` = final (you two vs the other couples).
-function songCard(so, head, fit, couple, delay) {
+// `felt` (v57): during and right after a final, only what the song asks for. How you compared with the other
+// couples waits for the scoresheets.
+function songCard(so, head, fit, couple, delay, felt) {
   let line = '';
-  if (fit) {
+  if (fit && felt) line = `<p>Rewards <b>${E.LABEL[fit.top[0]]}</b> and <b>${E.LABEL[fit.top[1]]}</b>.</p>`;
+  else if (fit) {
     const [c, w] = fitWord(fit.edge); const o = couple ? 'the other couples' : 'the other dancers';
     line = `<p>Rewards <b>${E.LABEL[fit.top[0]]}</b> and <b>${E.LABEL[fit.top[1]]}</b>. <span class="fit ${c}">${w}:</span> ${c === 'good' ? `${couple ? 'you two are' : "you're"} ahead of ${o} there` : c === 'bad' ? `${o} are stronger there` : `about level with ${o}`}.</p>`;
   }
@@ -2654,20 +2864,23 @@ function songCard(so, head, fit, couple, delay) {
 const songHead = (r, i) => r.spotlight ? 'Spotlight · one song' : `Song ${i + 1} of ${r.songs.length}`;
 const momentLi = (m, delay) => `<li${delay !== undefined ? ` style="animation-delay:${delay}s"` : ''}><span class="mk ${m.ok ? 'good' : 'bad'}">${m.ok ? '+' : '−'}</span><span>${esc(m.text)}</span><span class="tag">${E.LABEL[m.stat]}</span></li>`;
 // After the final: each song with its fit and moments, then your couple against the final on every stat.
-function setRecap(r) {
+// `felt` (v57, Steve): right after the final you only know what you felt on the floor, so no "vs the final" until
+// the scoresheets are up after the awards.
+function setRecap(r, felt) {
   if (!r.fit || !r.vs) return '';
   const order = E.STATS.slice().sort((a, b) => r.weights[b] - r.weights[a]);
   const d = k => r.vs.you[k] - r.vs.field[k];
   const songs = r.songs.map((so, i) => {
     const f = r.fit[i], [c, w] = fitWord(f.edge);
     return `<li><p><b>${r.songs.length > 1 ? (i + 1) + '. ' : ''}${esc(so.title)}</b> <span class="muted">· ${so.genre}</span></p>
-      <p class="tiny">Rewards ${E.LABEL[f.top[0]]} and ${E.LABEL[f.top[1]]} · <span class="fit ${c}">${w}</span></p>
+      <p class="tiny">Rewards ${E.LABEL[f.top[0]]} and ${E.LABEL[f.top[1]]}${felt ? '' : ` · <span class="fit ${c}">${w}</span>`}</p>
       <div class="chips" style="margin-top:4px">${r.moments.filter(m => m.song === i).map(m => `<span class="chip ${m.ok ? 'good' : 'bad'}">${m.ok ? '+' : '−'} ${E.LABEL[m.stat]}</span>`).join('')}</div></li>`;
   }).join('');
   const rows = order.map(k => `<div class="vs"><span>${E.LABEL[k]} <span class="muted num">${Math.round(r.weights[k] * 100)}%</span></span>
     <div class="bar"><i class="${d(k) >= 0 ? 'up' : 'down'}" style="width:${Math.min(50, Math.abs(d(k)) / 12 * 50)}%"></i></div>
     <span class="${d(k) > 2 ? 'good' : d(k) < -2 ? 'bad' : 'muted'}" style="font-size:.78rem">${vsWord(d(k))}</span></div>`).join('');
   const [a, b] = order;
+  if (felt) return fold('setfelt', 'How the set played', `${r.songs.length > 1 ? 'three songs' : 'one song'}, your moments`, `<ol class="setlist">${songs}</ol>`, true);
   return fold('set', 'How the set played', `leaned on ${E.LABEL[a]} and ${E.LABEL[b]}`, `
     <ol class="setlist">${songs}</ol>
     <p class="eyebrow" style="margin-top:10px">Your couple vs the final</p>
@@ -2801,15 +3014,58 @@ function prankedCard(wk) {
   return `<section class="prank got"><div class="sh"><span class="pk">Pranked!</span>${p.when ? `<span class="tiny">${esc(p.when)}</span>` : ''}</div>
     <p>${esc(p.text)} You can’t stop laughing.</p><div class="chips"><span class="chip good">Motivation ↑</span>${p.energy ? `<span class="chip">−${p.energy} energy</span>` : ''}</div></section>`;
 }
-function tyroneCard(t) {
-  if (!t) return '';
-  return `<section class="tyrone"><div class="polaroid">${tyPic(t.id)}</div><div class="stack" style="gap:6px"><span class="chip duck">Tyrone</span><p>${esc(t.text)}</p></div></section>`;
+// Tyrone shows up when it happens in the weekend (v57): `show` is the slot index it lands at (old saves: straight away).
+function tyroneCard(wk) {
+  const t = wk.tyrone; if (!t || wk.cur < (t.show || 0)) return '';
+  return `<section class="tyrone"><div class="polaroid">${tyPic(t.id)}</div><div class="stack" style="gap:6px"><span class="sh"><span class="chip duck">Tyrone</span>${t.when ? ` <span class="tiny muted">${esc(t.when)}</span>` : ''}</span><p>${esc(t.text)}</p></div></section>`;
 }
+const TY_NOTE = 'A note under your door: \u201cThe missing duck has a name. Tyrone is safe. For now.\u201d';
+const tyroneNote = () => `<section class="tyrone"><div class="polaroid">${tyPic('reveal')}</div><div class="stack" style="gap:6px"><span class="chip duck">Tyrone</span><p>${TY_NOTE}</p></div></section>`;
+const tyroneNoteNow = wk => wk.prank && wk.prank.id === 'ducks' && wk.tyroneNote !== undefined && wk.cur >= wk.tyroneNote ? tyroneNote() : '';
 // The wrap-up: the prank of the weekend, getting pranked, and the night Tyrone got his name.
+// Strictly (v57): the card to enter, while there's still time before Sunday.
+const strictlyEnergy = st => E.ROUND_ENERGY.Final + (st.size > 8 ? E.ROUND_ENERGY.Prelims : 0);
+const FIT_CHIP = { 'You click': 'good', 'Good fit': 'acc', 'Still learning each other': '' };
+// Round names say which competition (v57, Steve): "J&J prelims", "J&J final", vs the Strictly.
+const jj = rd => rd === 'Strictly' ? 'Strictly' : 'J&amp;J ' + rd.toLowerCase();
+// A couple's names with the usual tags: you, rivals, your practice partner (v57: same everywhere).
+const coupleTags = (p, me) => `${esc(p.name)}${me && p.name === S.name ? '<span class="rtag you">you</span>' : ''}${p.rival ? '<span class="rtag">rival</span>' : ''}${p.priya ? '<span class="rtag friendly">practice partner</span>' : ''}`;
+const coupleWho = row => `${coupleTags(row.lead, row.isPlayer)} &amp; ${coupleTags(row.follow, row.isPlayer)}`;
+function finalSheet(title, table, note) {
+  const J = E.JUDGES;
+  return `<section class="block"><h2>${title}</h2>${note || ''}<div class="tablewrap"><table>
+    <thead><tr><th>Pl</th><th class="cp">Couple</th>${J.map(j => `<th title="${j.name}">${j.name.slice(0, 3)}</th>`).join('')}<th title="Judges at this place or better">Maj.</th></tr></thead>
+    <tbody>${table.map(row => `<tr class="${row.isPlayer ? 'me' : row.lead.priya || row.follow.priya ? 'pr' : ''}"><td class="pl">${row.place}</td><td class="cp">${coupleWho(row)} <span class="muted num" style="font-size:.72rem">#${row.lead.bib}${row.follow.bib !== row.lead.bib ? '/#' + row.follow.bib : ''}</span></td>
+      ${row.ranks.map(x => `<td class="r ${x <= row.why.col ? 'cnt' : 'dim'}">${x}</td>`).join('')}<td class="maj">${row.why.cnt} at ${E.ordinal(row.why.col)}</td></tr>`).join('')}</tbody></table></div></section>`;
+}
+// The Strictly final gets the same big moment as the J&J final (Steve, v57): a "no draw" card, then the dance floor.
+function stDanceEv() {
+  const wk = S.wk, st = wk && wk.strictly, r = st && st.result; if (!r || !r.songs) return null;
+  return { strictly: true, ev: wk.res.ev, label: r.label, songs: r.songs, song: r.songs[0], moments: r.moments, fit: r.fit, spotlight: false, partner: { name: r.partner }, priya: r.priya, word: st.entered.word };
+}
+function strictlyCard() {
+  const wk = S.wk, st = wk && wk.strictly;
+  if (!st || !E.strictlyOpen(S) || V.strictlyNo === E.absWeek(S)) return '';
+  const ps = E.strictlyPartners(S); if (!ps.length) return '';
+  const half = st.fee / 2, can = E.spare(S) >= half, ev = wk.res.ev;
+  return `<section class="block"><div class="sec-head"><h2>Strictly · ${st.t}</h2><span class="chip acc">${st.combined ? 'Novice/Intermediate' : esc(ev.div) + ' and up'}</span></div>
+    <p class="hint">Pick your partner and dance all three songs together. About ${st.size} couples${st.size > 8 ? ': prelim, then final' : ', straight to the final'}. No points. Your half: $${half} entry, prizes $${st.prize.map(x => x / 2).join(' / $')}. Uses your ${st.t} slot and ${strictlyEnergy(st)} energy.</p>
+    <div class="stack" style="gap:8px">${ps.map(p => `<button class="opt" data-strictly="${p.id}" ${can ? '' : 'disabled'}>
+      <span class="t">${esc(p.name)}</span><span class="c">$${half}</span>
+      <span class="d"><span class="chip ${FIT_CHIP[p.word]}">${p.word}</span> ${p.priya ? 'Your practice partner.' : `You've danced together ${timesText(p.times)}.`}${!st.combined && p.div !== ev.div ? ` You'd dance the ${p.div} Strictly (${esc(p.name)}'s division).` : ''}${can ? '' : ` <b style="color:var(--bad)">Not enough spare money.</b>`}</span></button>`).join('')}</div>
+    <button class="linkbtn quiet" data-strictlyno="1">Not this time</button></section>`;
+}
+function strictlySum(wk) {
+  const r = wk.strictly && wk.strictly.result; if (!r) return '';
+  return `<section class="block"><div class="sec-head"><h2>Strictly</h2><button class="linkbtn" data-sheets="1">Scoresheets</button></div><p style="font-size:.9rem">With <b>${esc(r.partner)}</b>: ${r.out ? `out in the prelims (${E.ordinal(r.rank)} of ${r.size})` : `${E.ordinal(r.place)} in the final${r.prelim ? ` (${r.size} couples entered)` : ` of ${r.size} couples`}`}${r.prize ? `, <b class="num">$${r.prize}</b> as your half of the prize` : ''}.</p></section>`;
+}
 function prankRecap(wk) {
   const mine = wk.prank, got = wk.prankedBy && wk.prankedBy.done; if (!mine && !got) return '';
-  const lines = [mine && `<b>Prank of the weekend:</b> ${esc(mine.short)}.`, got && (wk.prankedBy.payback ? 'And they got you back.' : 'You got pranked too, and you’re still laughing.')].filter(Boolean);
-  const named = mine && mine.id === 'ducks' ? `<section class="tyrone"><div class="polaroid">${tyPic('reveal')}</div><div class="stack" style="gap:6px"><span class="chip duck">Tyrone</span><p>A note under your door: “The missing duck has a name. Tyrone is safe. For now.”</p></div></section>` : '';
+  // Every line says what happened and who did it (Steve, v57): payback names the room and the event it paid back.
+  const p = wk.prankedBy, what = got && (p.short || p.text.replace(/^Payback[^:]*: /, '').split('. ')[0].replace(/\.$/, ''));
+  const lines = [mine && `<b>Prank of the weekend:</b> ${esc(mine.short)}.`,
+    got && (p.payback ? `<b>Payback</b> from ${esc(p.from || 'a room you pranked')}: ${esc(what)}.` : `<b>${mine ? 'You got pranked too' : 'You got pranked'}:</b> ${esc(what)}. Still laughing.`)].filter(Boolean);
+  const named = mine && mine.id === 'ducks' ? tyroneNote() : '';
   return `<section class="prank recap"><p>${lines.join(' ')}</p></section>${named}`;
 }
 // Season wrap-up: Tyrone comes home.
@@ -2946,7 +3202,7 @@ const screens = {
       <p class="eyebrow">Week ${S.week} · Tier ${ev.tier} event</p>
       <h1>${esc(ev.name)}</h1>
       <div class="stack" style="gap:6px">
-        <p>${ev.div} Jack &amp; Jill, <b class="num">${ev.field}</b> ${S.role.toLowerCase()}s entered. ${ev.field <= 8 ? 'With so few entries there are no prelims: everyone dances the final, Saturday night.' : E.hasSemi(S, S.week) ? `Prelims → semifinal (top 16) → final (top 8).${ev.field < 40 ? ' A semifinal is optional at this size, and this event is running one.' : ''}` : `Prelims → final (top 8).${ev.field >= 20 ? ' A semifinal is optional at this size, and this event is going straight to the final.' : ''}`}</p>
+        <p>${ev.div} Jack &amp; Jill, <b class="num">${ev.field}</b> ${S.role.toLowerCase()}s entered. ${ev.field <= 8 ? 'With so few entries there are no prelims: everyone dances the final, Saturday night.' : E.hasSemi(S, S.week) ? `Prelims → semifinal (top 16) → final (top 8).${ev.field < 40 ? ' A semifinal is optional at this size, and this event is running one.' : ''}` : `Prelims → final (top 8).${ev.field >= 20 ? ' A semifinal is optional at this size, and this event is going straight to the final.' : ''}`}${ev.tier >= E.STRICTLY.tier ? ` Plus a ${ev.tier < 4 ? 'Novice/Intermediate' : ev.div} Strictly on Sunday, where you pick your partner.` : ''}</p>
         ${rivalLine(ev)}
         <p class="muted">WSDC Tier ${ev.tier} points: ${ptsTable(ev.tier)}</p>
         <p class="muted">Prizes: ${prizeText(ev)}</p>
@@ -2988,7 +3244,7 @@ const screens = {
     }
     return `${topbar()}
       <section class="block">
-        <p class="eyebrow">${esc(r.ev.name)} · ${rd.name} callbacks</p>
+        <p class="eyebrow">${esc(r.ev.name)} · ${jj(rd.name)} callbacks</p>
         <h1>Callbacks are posted</h1>
         ${heatLine(r, V.stage)}
         <p class="muted" style="font-size:.86rem">${n} bib numbers, in number order. Look for #${S.bib}.</p>
@@ -3001,8 +3257,8 @@ const screens = {
     const r = V.ev; const sm = r.semi; const songs = sm.songs || [sm.song];
     return `${topbar()}
     <section class="block">
-      <p class="eyebrow">${esc(r.ev.name)} · semifinal</p>
-      <h1>Semifinal heat</h1>
+      <p class="eyebrow">${esc(r.ev.name)} · J&amp;J semifinal</p>
+      <h1>J&amp;J semifinal heat</h1>
       <p>${songs.length > 1 ? 'Three songs, a new partner each song.' : 'Partners rotate through the heat.'} The judges watch your ${S.role.toLowerCase()}ing, not the couple, and every song asks for something different.</p>
     </section>
     <ul class="feed">${songs.map((so, i) => `<li class="grp">${songCard(so, `Song ${i + 1} of ${songs.length}${sm.partners && sm.partners[i] ? ' · with ' + sm.partners[i].name : ''}`, sm.fit && sm.fit[i], false, reduced ? 0 : .2 + i * 1.3)}
@@ -3038,12 +3294,74 @@ const screens = {
   },
   dance() {
     const r = V.ev;
-    return `<p class="eyebrow">${esc(r.ev.name)} · ${r.spotlight ? 'spotlight final' : 'final'}</p>
+    return `<p class="eyebrow">${esc(r.ev.name)} · ${r.strictly ? esc(r.label) + ' Strictly final' : r.spotlight ? 'J&amp;J spotlight final' : 'J&amp;J final'}</p>
     <div class="floorwrap"><canvas id="floor" aria-label="Top-down view of your couple dancing in the slot"></canvas>
       <span class="songline" id="songline">${esc(r.songs ? songLabel(r, 0) : r.song.title + ' · ' + r.song.genre)}</span><span class="count" id="count">5, 6</span></div>
     <ul class="feed" id="feed" aria-live="polite"></ul>
-    <button class="btn primary wide" id="scoresBtn" data-scores="1" hidden>See the scores</button>
-    <button class="btn ghost wide" id="skipBtn" data-skipdance="1">Skip to the scores</button>`;
+    <button class="btn primary wide" id="scoresBtn" data-scores="1" hidden>Leave the floor</button>
+    <button class="btn ghost wide" id="skipBtn" data-skipdance="1">Skip to the end</button>`;
+  },
+  // After the final (v57): how it felt, no placing. That waits for the awards ceremony.
+  stDraw() {
+    const r = stDanceEv(); if (!r) return screens.strictly();
+    return `${topbar()}
+    <p class="eyebrow">${esc(r.ev.name)} · ${esc(r.label)} Strictly final</p>
+    <h1>Strictly final</h1>
+    <p style="font-size:.9rem">No draw this time: you chose each other. ${r.priya ? N('Every Wednesday in the studio is about to pay off.') : `You've danced together before, and it shows.`}</p>
+    <div class="draws">
+      <div class="flip"><div class="inner"><div class="drawcard">
+        <p class="eyebrow">Your partner</p>
+        <div class="big">${esc(r.partner.name)}</div>
+        <p class="chip ${FIT_CHIP[r.word] || ''}" style="align-self:flex-start">${r.priya ? 'Your practice partner!' : esc(r.word)}</p>
+      </div></div></div>
+      <div class="flip"><div class="inner"><div class="drawcard">
+        <p class="eyebrow">The DJ's set</p>
+        ${r.songs.map((_, i) => `<div class="mystery"><span class="n">${i + 1}</span><span class="muted">Song ${i + 1}: ?</span></div>`).join('')}
+        <p class="muted" style="font-size:.78rem">Nobody hears them until the DJ hits play.</p>
+      </div></div></div>
+    </div>
+    <p class="muted" style="font-size:.86rem">Three songs, same partner, five judges. Placings at the awards ceremony.</p>
+    <button class="btn primary wide" data-dance="1">Take the floor</button>`;
+  },
+  danced() {
+    const r = V.ev;
+    return `${topbar()}
+    <section class="block">
+      <p class="eyebrow">${esc(r.ev.name)} · ${r.ev.div || 'Novice'} J&amp;J ${r.spotlight ? 'spotlight final' : 'final'}</p>
+      <h1>Final danced</h1>
+      <p>You and ${esc(r.partner.name)} left it all on the floor. ${r.moments.filter(m => m.ok).length >= 4 ? 'It felt good out there.' : r.moments.filter(m => m.ok).length <= 2 ? 'Some of it got away from you.' : 'Some great moments, some messy ones.'}</p>
+      <p class="hint">Placings are read out at the <b>awards ceremony, Sunday evening</b>.</p>
+    </section>
+    ${setRecap(r, true)}
+    <button class="btn primary wide" data-wk="1">Back to the weekend</button>`;
+  },
+  awards() {
+    const wk = S.wk, r = wk && wk.res; if (!r || !wk.awarded) return wk ? screens.weekend() : screens.hub();
+    const key = E.absWeek(S) + ':' + r.ev.id, fresh = V.awSeen !== key && !reduced; V.awSeen = key;
+    let t = 0; const step = fresh ? .7 : 0, d = () => (t += step).toFixed(2);
+    const who = coupleWho;
+    // Only the podium is read out (Steve, v57): 3rd, 2nd, 1st. Everyone finds their placing on the scoresheets after.
+    const list = rows => `<ol class="awl">${rows.filter(row => row.place <= 3).reverse().map(row => `<li class="${row.isPlayer ? 'me ' : ''}${row.place <= 3 ? 'p' + row.place : ''}" style="--d:${d()}s"><span class="pl">${E.ordinal(row.place)}</span><span>${who(row)}</span></li>`).join('')}</ol>`;
+    const jj = r.madeFinal ? `<section class="block"><h2>${r.ev.div || 'Novice'} Jack &amp; Jill</h2>${list(r.table)}
+        <p class="aw-after" style="--d:${d()}s;margin-top:10px">${r.place <= 3 ? `<b>You placed ${E.ordinal(r.place)}!</b>${r.points ? ` +${r.points} point${r.points > 1 ? 's' : ''}` : ''}${r.prize ? `, $${r.prize} prize` : r.prizePass ? ', and a free pass to a future event' : ''}.` : `Not on the podium this time. The scoresheets are up: see where you placed.`}</p>
+</section>`
+      : `<section class="block"><h2>${r.ev.div || 'Novice'} Jack &amp; Jill</h2><p>${r.winners ? `The winners: <b>${esc(r.winners.lead)} &amp; ${esc(r.winners.follow)}</b>. ` : ''}You cheered from the crowd.</p></section>`;
+    const st = wk.strictly && wk.strictly.result;
+    const sx = st && st.done ? (st.out ? '' : `<section class="block"><h2>${esc(st.label)} Strictly</h2>${list(st.table)}
+        <p class="aw-after" style="--d:${d()}s;margin-top:10px">${st.place <= 3 ? `<b>You and ${esc(st.partner)} placed ${E.ordinal(st.place)}!</b>${st.prize ? ` $${st.prize} as your half of the prize.` : ''}` : `Not on the podium this time. The scoresheet is up: see where you and ${esc(st.partner)} placed.`}</p>
+</section>`) : wk.strictly && wk.strictly.watch ? (w => `<section class="block"><h2>${esc(w.label)} Strictly</h2>${list(w.table)}</section>`)(wk.strictly.watch) : '';
+    const pw = wk.strictly && wk.strictly.watch && wk.strictly.watch.priya;
+    const pr = [r.priya && r.priya.final && r.priya.div !== r.ev.div ? N(`<b>{priya}</b> placed ${E.ordinal(r.priya.place)} in the ${r.priya.div} final.`) : '',
+      pw ? N(`<b>{priya}</b> and ${esc(wk.strictly.priyaBusy)} ${pw.place ? `placed ${E.ordinal(pw.place)} in` : 'danced'} the ${pw.div} Strictly.`) : ''].filter(Boolean).join(' ');
+    const away = (r.away || []).filter(a => /final/.test(a.text) && !/missed/.test(a.text)).map(a => `<b>${esc(a.name)}</b> placed ${esc(a.text.replace(' in the final', ''))} in the ${a.div} final.`);
+    const others = [pr, ...away].filter(Boolean);
+    return `${topbar()}
+    <section class="block"><p class="eyebrow">${esc(r.ev.name)} · Sunday evening</p><h1>Awards ceremony</h1>
+      <p class="muted tiny">The whole room squeezes in front of the stage. The top three are read out, third place first.</p></section>
+    ${jj}${sx}
+    ${others.length ? `<section class="block"><h2>Your people</h2><ul class="notes">${others.map(x => `<li class="good"><span>${x}</span></li>`).join('')}</ul></section>` : ''}
+    <button class="btn wide aw-after" style="--d:${d()}s" data-sheets="1">See the scoresheets</button>
+    <button class="btn primary wide" data-wk="1">Back to the weekend</button>`;
   },
   results() {
     const r = V.ev; const J = E.JUDGES;
@@ -3069,7 +3387,57 @@ const screens = {
           ${row.ranks.map(x => `<td class="r ${x <= row.why.col ? 'cnt' : 'dim'}">${x}</td>`).join('')}<td class="maj">${row.why.cnt} at ${E.ordinal(row.why.col)}</td></tr>`).join('')}</tbody>
       </table></div>
       <p class="muted" style="font-size:.8rem">Each judge ranks couples 1–8. Bold ranks are the ones that counted. Relative placement awards each place to the couple with a majority (3 of 5) of judges at that rank or better.</p>`)}
-    <button class="btn primary wide" data-wk="1">Back to the weekend</button>`;
+    ${S.wk && S.wk.res === r && (S.wk.awarded || S.wk.finished) ? `<button class="btn primary wide" data-sheets="1">Back to the scoresheets</button>` : `<button class="btn primary wide" data-wk="1">Back to the weekend</button>`}`;
+  },
+  strictly() {
+    const wk = S.wk, st = wk && wk.strictly, r = st && st.result, J = E.JUDGES;
+    if (!r) return wk ? screens.weekend() : screens.hub();
+    const pre = r.prelim, waiting = !r.done, after = !!wk.finished; // through the prelims, final still to dance
+    const pc = r.place && r.place <= 3 ? 'p' + r.place : '';
+    const back = after ? `<button class="btn primary wide" data-sumback="1">Back to the wrap-up</button>` : wk.awarded && r.done && !r.out ? `<button class="btn primary wide" data-awardsback="1">Back to the awards</button>` : `<button class="btn ${waiting ? 'ghost' : 'primary'} wide" data-wk="1">Back to the weekend</button>`;
+    // Callbacks are posted as bib numbers (like the J&J); where you placed waits for the sheets after the event.
+    const posted = pre && !after ? `<section class="block"><p class="eyebrow">${esc(wk.res.ev.name)} · ${esc(r.label)} Strictly prelims</p><h1>Callbacks are posted</h1>
+      <p class="muted" style="font-size:.86rem">${pre.bibs.length} couples' numbers, in number order. Look for #${S.bib}.</p>
+      <div class="bibs" style="--n:${pre.bibs.length}">${pre.bibs.map((b, i) => `<span class="${b === S.bib ? 'me' : ''}" style="--i:${i}">${b}</span>`).join('')}</div></section>
+      <section class="block verdict" style="--n:${pre.bibs.length}">${pre.advanced
+        ? (pre.pulledIn ? `<h2>${E.ordinal(pre.altNo || 1)} alternate, and you're in!</h2><p>You were called as ${E.ordinal(pre.altNo || 1)} alternate, then a couple withdrew.</p>` : `<h2>#${S.bib} is on the callback list for the final.</h2>`) + `<p>You and ${esc(r.partner)} dance the final next (${E.ROUND_ENERGY.Final} energy). Where you placed in the prelims stays a mystery until the scoresheets go up after the event.</p>`
+        : `<h2>No callback this time.</h2><p>${pre.altNo ? `You were called as ${E.ordinal(pre.altNo)} alternate, but ${pre.withdrew ? 'not enough couples' : 'nobody'} dropped out.` : `Your number wasn’t called.`} You'll see where you placed in the wrap-up.</p>`}</section>` : '';
+    const sheet = pre && after ? `<section class="block"><h2>Strictly prelims</h2>
+      <p style="font-size:.9rem">${E.ordinal(pre.rank)} of ${pre.size} couples${pre.advanced ? (pre.pulledIn ? ', in as an alternate' : '') : ''}. The top ${pre.cut} were called back.</p>
+      ${fold('stcall', 'Callback sheet', 'Yes / alternates from 5 judges', `<div class="tablewrap"><table class="sheet"><thead><tr><th>Bib</th><th class="cp">Couple</th>${J.map(j => `<th title="${j.name}">${j.name.slice(0, 2)}</th>`).join('')}<th>Σ</th></tr></thead>
+        <tbody>${pre.sheet.map((x, i) => `<tr class="${x.me ? 'me' : ''}${i === pre.cut ? ' cutline' : ''}"><td class="pl">${x.bib}</td><td class="cp">${esc(x.name)}${x.withdrew ? '<span class="rtag nem">withdrew</span>' : ''}${x.alt ? `<span class="rtag${x.in ? ' friendly' : ''}">${E.ordinal(x.alt)} alt${x.in ? ', in' : ''}</span>` : ''}</td>${x.marks.map(m => `<td class="mk-${m ? (m === 'Yes' ? 'yes' : 'alt') : 'no'}">${m}</td>`).join('')}<td class="r cnt">${x.sum}</td></tr>`).join('')}</tbody></table></div>`)}</section>` : '';
+    const prelimBlock = posted + sheet;
+    if (waiting) return `${topbar()}${posted}
+    <button class="btn primary wide" data-round="1">Dance the Strictly final</button>
+    ${back}`;
+    if (!r.out && !wk.awarded) return `${topbar()}
+    <section class="block"><p class="eyebrow">${esc(wk.res.ev.name)} · ${esc(r.label)} Strictly final</p><h1>Strictly final danced</h1>
+      <p>You and ${esc(r.partner)} danced all three songs together.</p>
+      <div class="chips">${moodChips(r.moods)}${Object.entries(r.d).map(([k, v]) => gainChip(k, v)).join('')}<span class="chip">−${r.energy} energy</span></div>
+      <p class="hint">Placings are read out at the <b>awards ceremony, Sunday evening</b>.</p></section>
+    <ul class="feed">${r.songs.map((so, i) => `<li class="grp">${songCard(so, `Song ${i + 1} of ${r.songs.length}`, r.fit && r.fit[i], true, undefined, true)}
+      <ul class="feed">${r.moments.filter(m => m.song === i).map(m => momentLi(m)).join('')}</ul></li>`).join('')}</ul>
+    ${back}`;
+    if (r.out && posted) return `${topbar()}${posted}
+    <section class="block"><div class="chips">${moodChips(r.moods)}${Object.entries(r.d).map(([k, v]) => gainChip(k, v)).join('')}<span class="chip">−${r.energy} energy</span></div>
+      <p class="muted tiny">No WSDC points in a Strictly. ${r.priya ? N('You and {priya} still had a blast.') : `Another dance together with ${esc(r.partner)}: you know each other a little better.`}</p></section>
+    ${back}`;
+    return `${topbar()}
+    <section class="block">
+      <p class="eyebrow">${esc(wk.res.ev.name)} · ${esc(r.label)} Strictly${r.out ? '' : ' final'}</p>
+      <div class="placing"><span class="place ${pc}">${r.out ? 'Out' : E.ordinal(r.place)}</span>
+        <div><p><b>${esc(S.name)} &amp; ${esc(r.partner)}</b></p><p class="muted">${r.out ? (after ? `in the prelims, ${E.ordinal(r.rank)} of ${r.size} couples` : 'no callback from the prelims') : `of ${pre ? 8 : r.size} couples in the final`}${r.prize ? ` · +$${r.prize} (your half)` : ''}</p></div></div>
+      <div class="chips">${moodChips(r.moods)}${Object.entries(r.d).map(([k, v]) => gainChip(k, v)).join('')}<span class="chip">−${r.energy} energy</span></div>
+      <p class="muted tiny">No WSDC points in a Strictly. ${r.priya ? N('You and {priya} know each other’s dancing cold.') : `Another dance together with ${esc(r.partner)}: you know each other a little better.`}</p>
+    </section>
+    ${r.out ? prelimBlock : `<ul class="feed">${r.songs.map((so, i) => `<li class="grp">${songCard(so, `Song ${i + 1} of ${r.songs.length}`, r.fit && r.fit[i], true)}
+      <ul class="feed">${r.moments.filter(m => m.song === i).map(m => momentLi(m)).join('')}</ul></li>`).join('')}</ul>
+    ${fold('stscores', 'Scoresheet', '5 judges · relative placement', `<div class="tablewrap"><table>
+        <thead><tr><th>Pl</th><th class="cp">Couple</th>${J.map(j => `<th title="${j.name}">${j.name.slice(0, 3)}</th>`).join('')}<th title="Judges at this place or better">Maj.</th></tr></thead>
+        <tbody>${r.table.map(row => `<tr class="${row.isPlayer ? 'me' : ''}"><td class="pl">${row.place}</td><td class="cp">${esc(row.lead.name)} &amp; ${esc(row.follow.name)} <span class="muted num" style="font-size:.72rem">#${row.lead.bib}</span></td>
+          ${row.ranks.map(x => `<td class="r ${x <= row.why.col ? 'cnt' : 'dim'}">${x}</td>`).join('')}<td class="maj">${row.why.cnt} at ${E.ordinal(row.why.col)}</td></tr>`).join('')}</tbody></table></div>`)}
+    ${prelimBlock}`}
+    ${back}`;
   },
   weekend() {
     const wk = S.wk, r = wk.res, ev = r.ev;
@@ -3080,36 +3448,53 @@ const screens = {
       let body = '';
       if (sl.done && sl.result && sl.result.round) {
         const x = sl.result;
-        body = x.round === 'Final' ? `<b>Final: ${E.ordinal(x.place)}</b><span class="muted"> · +${x.points} pts</span>`
-          : `<b>${x.round}: ${E.ordinal(x.info.rank)} of ${x.info.size}</b><span class="muted"> · ${x.info.advanced ? (x.info.pulledIn ? 'in as alternate' : 'through') : 'out'}</span>`;
+        const told = wk.awarded; // final placings wait for the awards ceremony
+        body = x.round === 'Strictly' ? `<b>Strictly${x.out ? ' prelims: no callback' : told ? ` final: ${E.ordinal(x.place)}` : ' final: danced'}</b><span class="muted"> · with ${esc(x.partner)}${x.out ? ' · out' : !told ? ' · placings at the awards' : x.prize ? ` · +$${x.prize}` : ''}</span> <button class="linkbtn" data-strictlysee="1">See it</button>`
+          : x.round === 'Final' ? (told ? `<b>J&amp;J final: ${E.ordinal(x.place)}</b><span class="muted"> · +${x.points} pts</span>` : `<b>J&amp;J final: danced</b><span class="muted"> · placings at the awards</span>`)
+          : `<b>${jj(x.round)}: ${x.info.advanced ? (x.info.pulledIn ? 'in as alternate' : 'called back') : 'no callback'}</b><span class="muted"> · ${x.info.advanced ? 'through to the ' + x.info.next.toLowerCase() : 'placings go up after the event'}</span>`;
       } else if (sl.done && sl.result) {
         const x = sl.result;
         const chips = `<div class="chips">${moodChips(x.moods)}${Object.entries(x.d).map(([k, v]) => gainChip(k, v)).join('')}${x.sc ? `<span class="chip ${x.sc > 0 ? 'good' : 'bad'}">Community ${signed(x.sc)}</span>` : ''}${x.energy ? `<span class="chip">${signed(x.energy)} energy</span>` : ''}${x.money ? `<span class="chip">−$${x.money}</span>` : ''}${x.met ? `<span class="chip good">+${x.met} people you know</span>` : ''}</div>`;
         body = x.prank ? prankCard(x, chips, i === wk.cur - 1) : `<b>${esc(x.title)}</b><p class="muted tiny">${esc(x.note)}</p>${chips}`;
+      } else if (state === 'now' && E.awardsDue(S)) {
+        body = `<span class="muted">After the awards.</span>`;
+      } else if (state === 'now' && sl.round === 'Strictly') {
+        const st = wk.strictly, fin = st.size <= 8 || (st.result && st.result.prelim), E8 = E.ROUND_ENERGY;
+        body = `<b>Strictly ${fin ? 'final' : 'prelims'} with ${esc(st.entered.name)}</b><p class="muted tiny">${st.size <= 8 ? `${st.size} couples, straight to the final. ` : fin ? `You're through: 8 couples, five judges. ` : `${st.size} couples: the top 8 get called back for the final. `}Three songs together, the DJ picks them. Costs ${fin ? E8.Final : E8.Prelims} energy.${ef ? ` At ${S.energy} energy you're about ${ef}% below your best.` : ''}</p>
+          <button class="btn primary wide" data-round="1">Dance the Strictly ${fin ? 'final' : 'prelims'}</button>`;
       } else if (state === 'now' && sl.round) {
         const rd = sl.round; const cut = rd === 'Prelims' ? (r.hasSemi ? 16 : 8) : rd === 'Semifinal' ? 8 : null;
-        body = `<b>${rd}</b><p class="muted tiny">${rd === 'Final' ? 'Random partner, songs from the DJ, five judges.' : `${rd === 'Prelims' ? ev.field : 16} dancers, top ${cut} go through.`} Costs ${E.ROUND_ENERGY[rd]} energy to dance.${ef ? ` At ${S.energy} energy you're about ${ef}% below your best.` : ''}</p>
-          <button class="btn primary wide" data-round="1">${rd === 'Final' ? 'Draw your partner' : 'Dance the ' + rd.toLowerCase()}</button>`;
+        body = `<b>${jj(rd)}</b><p class="muted tiny">${rd === 'Final' ? 'Random partner, songs from the DJ, five judges.' : `${rd === 'Prelims' ? ev.field : 16} dancers, top ${cut} go through.`} Costs ${E.ROUND_ENERGY[rd]} energy to dance.${ef ? ` At ${S.energy} energy you're about ${ef}% below your best.` : ''}</p>
+          <button class="btn primary wide" data-round="1">${rd === 'Final' ? 'Draw your J&amp;J final partner' : 'Dance the ' + jj(rd)}</button>`;
       } else if (state === 'now') {
         const nx = wk.slots.slice(i + 1).find(x => x.round);
-        const ahead = nx ? `<p class="hint">Next round: <b>${nx.round}</b> (${nx.t}). At ${S.energy} energy you'd dance at ${Math.round(E.energyFactor(S.energy) * 100)}% of your best.</p>` : '';
+        const ahead = nx ? `<p class="hint">Next round: <b>${jj(nx.round)}</b> (${nx.t}). At ${S.energy} energy you'd dance at ${Math.round(E.energyFactor(S.energy) * 100)}% of your best.</p>` : '';
         body = `${ahead}<div class="stack" style="gap:8px">${E.slotOptions(S, i).map(o => `<button class="opt" data-pick="${o.id}" ${o.ok ? '' : 'disabled'}>
           <span class="t">${esc(o.title)}${star(o.stat && o.stat === focusNow())}</span><span class="c">${o.money ? '$' + o.money + ' · ' : ''}${o.energy < 0 ? '+' + (-o.energy) : o.energy ? '−' + o.energy : '±0'} energy</span>
           <span class="d">${esc(o.desc)}${o.teach !== undefined ? ` ${cap(teachLabel(o.teach).replace(/(<b[^>]*>)(\w)/, (m, t, c) => t + c.toUpperCase()))}.` : ''}${o.ok ? shortNote(o.money) : ` <b style="color:var(--bad)">${o.why}.</b>`}</span></button>`).join('')}</div>`;
       } else {
-        body = sl.round ? `<b>${sl.round}</b>` : `<span class="muted">${sl.wasRound ? 'Free (you’re out of the ' + sl.wasRound.toLowerCase() + ')' : sl.night ? 'Free · social night' : 'Free · workshops'}${sl.star ? ' · star workshop' : ''}${sl.priya ? N(' · {priya}’s final') : ''}${sl.offer ? ' · pro offer' : ''}</span>`;
+        body = sl.round === 'Strictly' ? `<b>Strictly with ${esc(wk.strictly.entered.name)}</b>` : sl.round ? `<b>${jj(sl.round)}</b>` : `<span class="muted">${sl.wasRound ? 'Free (you’re out of the ' + jj(sl.wasRound) + ')' : sl.night ? 'Free · social night' : 'Free · workshops'}${sl.star ? ' · star workshop' : ''}${sl.priya ? N(' · {priya}’s final') : ''}${sl.offer ? ' · pro offer' : ''}${sl.strictly && E.strictlyOpen(S) ? ' · Strictly' : ''}</span>`;
       }
-      return `<li class="${state} ${sl.round ? 'round' : ''}"><span class="when">${sl.t}</span><div class="wb">${body}</div></li>`;
+      const row = `<li class="${state} ${sl.round ? 'round' : ''}"><span class="when">${sl.t}</span><div class="wb">${body}</div></li>`;
+      if (i !== wk.awardsAt) return row;
+      // The awards ceremony, Sunday evening before the last social (v57): not a slot of its own.
+      const due = E.awardsDue(S), st = wk.strictly && wk.strictly.result, inFinal = r.madeFinal || (st && st.done && !st.out);
+      const aw = wk.awarded
+        ? `<b>Awards ceremony</b><span class="muted"> · ${[r.madeFinal ? `J&amp;J ${E.ordinal(r.place)}` : '', st && st.done && !st.out ? `Strictly ${E.ordinal(st.place)}` : ''].filter(Boolean).join(' · ') || 'you cheered the winners'}</span> <button class="linkbtn" data-awardsback="1">See it</button>`
+        : due ? `<b>Awards ceremony</b><p class="muted tiny">${inFinal ? 'The top three are read out, then the scoresheets go up. This is where you find out.' : 'Cheer the winners before the last social.'}</p><button class="btn primary wide" data-awards="1">Go to the awards</button>`
+        : `<span class="muted">Awards ceremony</span>`;
+      return `<li class="${wk.awarded ? 'past' : due ? 'now' : 'next'} round"><span class="when">Sun evening</span><div class="wb">${aw}</div></li>` + row;
     }).join('');
     return `${topbar()}
     <section class="block">
-      <p class="eyebrow">Tier ${ev.tier} · ${ev.div || 'Novice'} J&amp;J${r.out ? ' · you’re out, weekend is yours' : ''}</p>
+      <p class="eyebrow">Tier ${ev.tier} · ${ev.div || 'Novice'} J&amp;J${wk.strictly ? ' + Strictly' : ''}${r.out ? ' · you’re out of the J&amp;J' : ''}</p>
       <h1>${esc(ev.name)}</h1>
       ${wk.news.length ? `<div class="news">${wk.news.map(n => `<div class="banner"><span class="chip ${n.tone || 'acc'}">${n.tag}</span><span>${esc(n.text)}</span></div>`).join('')}</div>` : ''}
       <p class="muted tiny">Visiting pro this weekend: ${esc(wk.pro.name)}, who teaches ${E.LABEL[wk.pro.topic].toLowerCase()}.</p>
     </section>
-    ${prankedCard(wk)}${tyroneCard(wk.tyrone)}
+    ${prankedCard(wk)}${tyroneCard(wk)}${tyroneNoteNow(wk)}
     ${tipCard('weekend')}
+    ${strictlyCard()}
     ${stand()}
     <section class="block"><ol class="timeline">${rows}</ol>
     ${doneAll ? `<button class="btn primary wide" data-wrap="1">Head home</button>` : ''}</section>`;
@@ -3126,9 +3511,10 @@ const screens = {
       ${r.priya && S.priyaNews && S.priyaNews.week === S.week && S.priyaNews.season === seasonNo() ? `<p style="font-size:.86rem"><b>${N('{priya}')}:</b> ${esc(S.priyaNews.text.replace(/^[^:]+ at [^:]+: /, ''))}</p>` : ''}
       <p class="muted tiny">Includes a little Composure from competing and +${E.SC.event} community for showing up. You'll recover ${E.RECOVER} energy before Monday.</p>
     </section>
+    ${strictlySum(wk)}
     ${prankRecap(wk)}
     ${rivalWrap(r)}
-    ${r.rounds.some(x => x.sheet) ? `<button class="btn wide" data-sheets="1">See the scoresheets</button>` : ''}
+    ${r.rounds.some(x => x.sheet) || r.table || (wk.strictly && (wk.strictly.result || wk.strictly.watch)) ? `<button class="btn wide" data-sheets="1">See the scoresheets</button>` : ''}
     ${reviewBlock()}
     <button class="btn primary wide" data-evdone="1">${S.done ? 'Career wrap-up' : S.seasonDone ? 'Season wrap-up' : 'Back to training'}</button>`;
   },
@@ -3169,6 +3555,7 @@ const screens = {
       `Night socials are for spare energy. The die-hards stay late, so some of the people you dance with will be in the other role's final, and drawing someone you know helps.`,
       `Once you're out, or your rounds are done, spend freely: workshops, a private with the visiting pro, the Sunday night social.`,
       `The espresso's crash hits after your next round. Right before your last round of the weekend, the crash no longer matters.`,
+      `A Strictly with someone you know well beats one with someone you're still learning: the better you know each other, the more Connection you bring as a couple. People become open to a Strictly after you've danced together a few times, at socials or in heats.`,
       `Send your video to the coach. The two-week focus on what went wrong is worth the $${E.REVIEW.coach}.`,
     ])}
     ${sec('Rivals', [
@@ -3198,13 +3585,18 @@ const screens = {
     const other = S.role === 'Lead' ? 'Follows' : 'Leads', wk = S.wk && S.wk.res === r ? S.wk : null;
     const danced = name => !wk || wk.finished || wk.slots.findIndex(sl => sl.round === name || sl.wasRound === name) < wk.cur;
     const oSheets = (r.otherRounds || []).filter(rd => danced(rd.name));
+    const told = !wk || wk.awarded || wk.finished, st = wk && wk.strictly; // finals go up after the awards
+    const sx = told && st ? (st.result && st.result.done ? { ...st.result, mine: true } : st.watch) : null;
     return `${topbar()}
     <p class="eyebrow">${esc(r.ev.name)} · scoresheets</p>
     <h1>Scoresheets</h1>
     <p class="muted" style="font-size:.86rem">Judges: ${J.map(j => j.name).join(', ')}.</p>
     ${r.rounds.filter(x => x.sheet).map(tbl).join('')}
     ${oSheets.length ? `<p class="eyebrow" style="margin-top:8px">${other}${r.priyaHere ? N(' ({priya} danced this one)') : ''}</p>${oSheets.map(rd => tbl({ ...rd, name: `${other}: ${rd.name}` }, other.slice(0, -1))).join('')}` : ''}
-    <button class="btn primary wide" data-sumback="1">Back to the wrap-up</button>`;
+    ${told && r.table ? finalSheet(`${r.ev.div || 'Novice'} J&amp;J final`, r.table, `<p class="muted tiny">Relative placement: a place goes to the couple with a majority (3 of 5) of judges at that rank or better. <button class="linkbtn" data-results="1">Judges' notes</button></p>`) : ''}
+    ${sx ? `<p class="eyebrow" style="margin-top:8px">${esc(sx.label)} Strictly${sx.mine ? '' : ' (you watched this one)'}</p>
+      ${sx.prelim ? tbl({ ...sx.prelim, name: 'Strictly prelims' }, 'Couple') : ''}${sx.table ? finalSheet('Strictly final', sx.table) : ''}` : ''}
+    ${wk && wk.awarded && !wk.finished ? `<button class="btn primary wide" data-awardsback="1">Back to the awards</button>` : `<button class="btn primary wide" data-sumback="1">Back to the wrap-up</button>`}`;
   },
   season() {
     const n = seasonNo(), hist = thisSeason(n), got = hist.reduce((a, h) => a + (h.points || 0), 0), d = E.door(S);
@@ -3278,7 +3670,7 @@ function loadGame(d) {
   if (!screens[V.screen] || V.screen === 'start') V.screen = 'hub';
   if (V.screen === 'rivals') { V.screen = 'hub'; V.tab = 'rivals'; } // saves from before the tabs (v56)
   if (!V.tab) V.tab = 'week';
-  if (V.screen === 'dance') V.screen = 'draw'; // the animation can't resume halfway; replay it from the draw
+  if (V.screen === 'dance') V.screen = V.ev && V.ev.strictly ? 'stDraw' : 'draw'; // the animation can't resume halfway; replay it from the draw
   if (S.wk && V.ev) V.ev = S.wk.res;          // saving splits these into two copies; make them one object again
   E.resume(S);
 }
@@ -3366,8 +3758,12 @@ app.addEventListener('click', e => {
   if (d.next) return afterWeek();
   if (d.register) { const ev = E.eventAt(S, S.week); E.startEvent(S, { single: !!V.single && ev.travel !== 'home' }); V.single = false; V.ev = S.wk.res; V.review = null; return go('weekend'); }
   if (d.pick) { E.chooseSlot(S, d.pick); return render(); }
+  if (d.strictly) { E.enterStrictly(S, d.strictly); return render(); }
+  if (d.strictlyno) { V.strictlyNo = E.absWeek(S); return render(); }
+  if (d.strictlysee) return go('strictly');
   if (d.round) {
     const x = E.danceRound(S); V.ev = S.wk.res;
+    if (x.round === 'Strictly') return go(x.stage === 'prelim' || x.out ? 'strictly' : 'stDraw');
     if (x.round === 'Prelims') return showStage(0);
     if (x.round === 'Semifinal') return go('semi');
     return go('draw');
@@ -3386,9 +3782,12 @@ app.addEventListener('click', e => {
   if (d.stage) return showStage(Number(d.stage));
   if (d.review) { const rv = E.buyReview(S, V.ev, d.review); if (rv) V.review = rv; return render(); }
   if (d.draw) return go('draw');
-  if (d.dance) return go('dance');
+  if (d.dance) { if (V.screen === 'stDraw') V.ev = stDanceEv(); return go('dance'); }
   if (d.skipdance) return finishDance(true);
-  if (d.scores) return go('results');
+  if (d.scores) { if (V.ev && V.ev.strictly) { V.ev = S.wk.res; return go('strictly'); } return go('danced'); }
+  if (d.awards) { E.awards(S); return go('awards'); }
+  if (d.results) return go('results');
+  if (d.awardsback) return go('awards');
   if (d.evdone) return afterEvent();
   if (d.restart) { clearSave(); S = null; return go('start'); }
   if (d.continue) {
@@ -3417,7 +3816,7 @@ function songGroup(feed, si) {
   const r = V.ev; let grp = document.getElementById('grp' + si);
   if (grp) return grp;
   grp = document.createElement('li'); grp.className = 'grp'; grp.id = 'grp' + si;
-  grp.innerHTML = (r.songs ? songCard(r.songs[si], songHead(r, si), r.fit && r.fit[si], true) : '') + '<ul class="feed"></ul>';
+  grp.innerHTML = (r.songs ? songCard(r.songs[si], songHead(r, si), r.fit && r.fit[si], true, undefined, true) : '') + '<ul class="feed"></ul>';
   feed.prepend(grp);
   const sl = document.getElementById('songline'); if (sl && r.songs) sl.textContent = songLabel(r, si);
   return grp;
