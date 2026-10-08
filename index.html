@@ -150,6 +150,17 @@ details.fold[open]>summary::after{content:"▾"}
 .opt .t{font-weight:700}
 .opt .lv{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink)}
 .opt .d{grid-column:1/-1;font-size:.84rem;color:var(--muted)}
+/* Traits (v58): upside and catch on two lines */
+.trait-up,.trait-catch{display:block;font-size:.84rem;margin-top:3px}
+.trait-up b{color:var(--good)}.trait-catch b{color:var(--warn)}
+.traitchips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px}
+/* Unlocked (v58): a gold card, like the 1st-place medal */
+.unlock{border:2px solid var(--gold);background:color-mix(in srgb,var(--gold) 12%,var(--surface))}
+.rtag.dv{color:var(--muted);border-color:var(--muted)}
+.ftraits{border-left:3px solid var(--gold);background:color-mix(in srgb,var(--gold) 10%,var(--surface));border-radius:8px;padding:8px 12px;margin:10px 0}
+.ftraits .ul{font-family:var(--display);font-weight:800;color:var(--gold);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase}
+.ftraits p{margin:3px 0 0;font-size:.88rem}.ftraits b{color:var(--gold)}
+.unlock .ul{font-family:var(--display);font-weight:800;color:var(--gold);font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
 .opt .c{font-family:var(--mono);font-size:.78rem;font-weight:700;align-self:start}
 
 .diary ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
@@ -463,25 +474,21 @@ const Engine = (() => {
       size: { Novice: 30, Intermediate: 26 }, prize: [150, 75, 40] },
     pacific: { name: 'Pacific Crown Open', week: 18, travel: 'fly', pass: 140, trip: 200, hotel: 110,
       size: { Novice: 50, Intermediate: 44 }, prize: [250, 125, 60] },
-    // Parked (Steve, v39): these used to join the calendar in week 8. Kept so older saves that have one still work.
-    alpine: { name: 'Alpine Swing Escape', week: 10, travel: 'carpool', pass: 100, trip: 45, hotel: 150, late: true,
-      size: { Novice: 24, Intermediate: 20 }, prize: [120, 60, 30] },
-    riverside: { name: 'Riverside Swing Weekend', week: 14, travel: 'drive', pass: 80, trip: 25, hotel: 70, late: true,
-      size: { Novice: 14, Intermediate: 12 }, prize: ['pass', 40, 20] },
   };
 
   const SUGGESTED = ['harbour', 'rainforest', 'pacific']; // season 1's pre-picked calendar (the classic three)
   const LATE_WEEK = 8;
   const tierOf = field => field <= 10 ? 1 : field < 20 ? 2 : field < 40 ? 3 : 4;
   // A season's calendar: every circuit event, with whether you're going. Plain data for the save.
-  const makeCalendar = picks => Object.entries(EVENTS).filter(([, e]) => !e.late).map(([id, e]) => ({ id, week: e.week, going: picks.includes(id) }));
+  const makeCalendar = picks => Object.entries(EVENTS).map(([id, e]) => ({ id, week: e.week, going: picks.includes(id) }));
   // An event as you'd enter it: your division's field, strength, tier and total cost.
   function entry(s, c) {
     const e = EVENTS[c.id], div = s.div || 'Novice', field = e.size[div];
-    return { ...e, id: c.id, week: c.week, div, field, tier: tierOf(field), cost: e.pass + e.trip + e.hotel };
+    const trip = has(s, 'budget') ? Math.round(e.trip * .75) : e.trip; // a Budget Traveller finds the cheap fares
+    return { ...e, id: c.id, week: c.week, div, field, tier: tierOf(field), trip, cost: e.pass + trip + e.hotel };
   }
   const eventAt = (s, week) => { const c = (s.cal || []).find(x => x.week === week && x.going); return c ? entry(s, c) : null; };
-  const calendarOf = s => (s.cal || []).slice().sort((a, b) => a.week - b.week).map(c => ({ ...entry(s, c), going: c.going, locked: !!c.locked, booked: !!(c.booked || c.legacy), paid: c.paid || 0, doorPass: !!c.doorPass, missed: !!c.missed, doorOk: doorOk(s, c), doorPrice: doorPrice(entry(s, c)) }));
+  const calendarOf = s => (s.cal || []).slice().sort((a, b) => a.week - b.week).map(c => ({ ...entry(s, c), going: c.going, locked: !!c.locked, booked: !!c.booked, paid: c.paid || 0, doorPass: !!c.doorPass, missed: !!c.missed, doorOk: doorOk(s, c), doorPrice: doorPrice(entry(s, c)) }));
   // Booking (Steve, v39). "Going" is a booking you can change until the deadline: the end of the week 2 weeks before
   // a local or drive event, 4 weeks before a fly-in. At the deadline you pay the pass (and the flight for a fly-in)
   // and the booking locks: no refunds. The rest (hotel, gas) is due at the event, and once you've booked, the game
@@ -497,7 +504,7 @@ const Engine = (() => {
   // flight ($60 more). Free passes from prizes don't apply. Nothing is paid until the event, so you can change your mind.
   const DOOR = { extra: 25, flight: 60 };
   const doorPrice = e => e.cost + DOOR.extra + (e.travel === 'fly' ? DOOR.flight : 0);
-  const doorOk = (s, c) => c.locked && !c.booked && !c.legacy && !c.done && c.week >= s.week;
+  const doorOk = (s, c) => c.locked && !c.booked && !c.done && c.week >= s.week;
   function doorPass(s, id, on) {
     const c = (s.cal || []).find(x => x.id === id); if (!c || !doorOk(s, c)) return false;
     c.doorPass = c.going = !!on; return true;
@@ -526,14 +533,13 @@ const Engine = (() => {
     const c = (s.cal || []).find(x => x.id === ev.id && x.week === ev.week);
     if (c && c.booked) return doorOf(ev);
     if (c && c.doorPass) return doorPrice(ev);
-    if (c && c.legacy) return ev.cost - ((s.passes || 0) > 0 ? ev.pass : 0); // booked before v39: pay it all at the door
     return upfrontOf(ev, (s.passes || 0) > 0) + doorOf(ev);
   }
   // The most you can spend right now and still pay every booked event at the door, counting the pay you'll get first.
   function spare(s) {
     let need = 0, most = s.money;
-    for (const c of (s.cal || []).filter(c => (c.booked || c.legacy) && c.going && !c.done && c.week >= s.week).sort((a, b) => a.week - b.week)) {
-      need += priceOf(s, entry(s, c)); most = Math.min(most, s.money + INCOME * (c.week - s.week) - need);
+    for (const c of (s.cal || []).filter(c => c.booked && c.going && !c.done && c.week >= s.week).sort((a, b) => a.week - b.week)) {
+      need += priceOf(s, entry(s, c)); most = Math.min(most, s.money + incomeOf(s) * (c.week - s.week) - need);
     }
     return Math.max(0, most);
   }
@@ -543,7 +549,7 @@ const Engine = (() => {
     const out = []; let passes = s.passes || 0;
     for (const c of (s.cal || []).filter(c => c.going && !c.done && c.week >= s.week)) {
       const e = entry(s, c);
-      if (c.booked || c.legacy || c.doorPass) out.push({ week: c.week, amount: priceOf(s, e), ev: e, kind: c.doorPass ? 'doorPass' : 'door' });
+      if (c.booked || c.doorPass) out.push({ week: c.week, amount: priceOf(s, e), ev: e, kind: c.doorPass ? 'doorPass' : 'door' });
       else { const free = passes-- > 0; out.push({ week: Math.max(s.week, bookBy(c)), amount: upfrontOf(e, free), ev: e, kind: 'book' }, { week: c.week, amount: doorOf(e), ev: e, kind: 'door' }); }
     }
     return out.sort((a, b) => a.week - b.week);
@@ -551,20 +557,20 @@ const Engine = (() => {
   // If you spent `cost` now and nothing else, the first payment you couldn't make (counting your pay), or null.
   function shortfall(s, cost) {
     let paid = 0;
-    for (const d of dues(s)) { paid += d.amount; const have = s.money - cost + INCOME * (d.week - s.week) - paid; if (have < 0) return { ...d, short: -have, wait: d.week - s.week }; }
+    for (const d of dues(s)) { paid += d.amount; const have = s.money - cost + incomeOf(s) * (d.week - s.week) - paid; if (have < 0) return { ...d, short: -have, wait: d.week - s.week }; }
     return null;
   }
   // The most you could spend every week, this one included, and still make every payment (v56, Steve: "how is my
   // money looking?"). The tightest payment sets it; null when nothing is due.
   function weeklySpare(s) {
     let cum = 0, best = null;
-    for (const d of dues(s)) { cum += d.amount; const x = (s.money + INCOME * (d.week - s.week) - cum) / (d.week - s.week + 1); if (!best || x < best.x) best = { ...d, x: Math.floor(x) }; }
+    for (const d of dues(s)) { cum += d.amount; const x = (s.money + incomeOf(s) * (d.week - s.week) - cum) / (d.week - s.week + 1); if (!best || x < best.x) best = { ...d, x: Math.floor(x) }; }
     return best;
   }
   // The money you'd need to keep now to make every payment on time.
-  const keepFor = s => { let paid = 0, need = 0; for (const d of dues(s)) { paid += d.amount; need = Math.max(need, paid - INCOME * (d.week - s.week)); } return need; };
+  const keepFor = s => { let paid = 0, need = 0; for (const d of dues(s)) { paid += d.amount; need = Math.max(need, paid - incomeOf(s) * (d.week - s.week)); } return need; };
   // The booked event that money is being kept for, for messages.
-  const heldFor = s => (s.cal || []).filter(c => (c.booked || c.legacy) && c.going && !c.done && c.week >= s.week).sort((a, b) => a.week - b.week).map(c => entry(s, c))[0] || null;
+  const heldFor = s => (s.cal || []).filter(c => c.booked && c.going && !c.done && c.week >= s.week).sort((a, b) => a.week - b.week).map(c => entry(s, c))[0] || null;
   const holdWhy = s => { const e = heldFor(s); return e ? `Kept back for ${e.name}` : 'Not enough money'; };
   const nextEvent = (s, after) => calendarOf(s).find(e => e.going && (after ? e.week > s.week : e.week >= s.week)) || null;
   // WSDC points by tier (finals of 8 here, so the tail of 1-point places stops at 8th).
@@ -626,7 +632,7 @@ const Engine = (() => {
   }
   // You meet your partners one at a time (Steve, v48): Priya in week 2, Leah's first free week is week 4, Dev when
   // you reach Intermediate. s.pals[k] = { at: absolute week of the intro, seen: intro card dismissed }.
-  const knows = (s, k) => !s.pals || !!s.pals[k]; // saves from before v48 know everyone they could
+  const knows = (s, k) => !!(s.pals && s.pals[k]);
   const CLASS = { cost: 15, energy: 6 }, SOCIAL = { cost: 15, energy: 12 }, MOCK = { cost: 10, energy: 6 };
   const PRIVATE_COST = 80, PRIVATE_ENERGY = 12, DISCOUNT = 40, DEV_UNLOCK = 35;
   const SC = { cls: 4, social: 5, mock: 3, event: 4, decay: 2 };
@@ -693,16 +699,29 @@ const Engine = (() => {
   ];
   // A rival at the event might get involved (Steve, v56): at most one line, about half the time.
   const PRANK_RIVAL = {
-    friendly: { react: '{n}: \u201cYou did this without me?\u201d', inOn: '{n} was in on it, and kept watch by the elevator.', room: 'It was {n}\u2019s room. They\u2019ve already started planning revenge, and it\u2019s going to be great.' },
-    rival: { react: '{n}: \u201cReal mature.\u201d (They laughed. You saw it.)', room: 'It was {n}\u2019s room. They say it \u201cwasn\u2019t that funny.\u201d Their roommate says they laughed for ten minutes.' },
+    // Steve (v58): a friendly rival usually gets in on it with you (and that's a little extra lift), rather than
+    // being sad they missed it. Two ways in on it for each one about their room.
+    friendly: {
+      inOn: ['{n} was in on it, and kept watch by the elevator.', '{n} talked the front desk into a spare key card. Nobody asks how.',
+        '{n} kept the other room busy at the bar while you set it up.', '{n} filmed the whole thing. It\u2019s already in the group chat.',
+        '{n} showed up with supplies before you\u2019d even asked.', '{n} insisted on doing the finishing touch. It was the right call.'],
+      room: 'It was {n}\u2019s room. They\u2019ve already started planning revenge, and it\u2019s going to be great.' },
+    rival: { react: '{n}: \u201cReal mature.\u201d (They laughed. You saw it.)', room: 'It was {n}\u2019s room. They say it \u201cwasn\u2019t that funny.\u201d Their roommate says they laughed for ten minutes.',
+      helped: '{n} wanted no part of it. Then held the door. Then had ideas.' },
   };
-  // Tyrone (Steve, v56): the one duck that never came back. Seen at your later events that season, home at the end.
+  // Tyrone (Steve, v56): the one duck that never came back. v58 (Steve): up to two sightings a weekend at your later
+  // events, and he stays out (into next season if need be) until you've seen him TY_SIGHTINGS times; then he comes
+  // home on that season's wrap-up.
+  const TY_SIGHTINGS = 4;
   const TYRONE = [
     { id: 'workshop', text: 'Tyrone was spotted in the Novice workshop. Better frame than you.' },
     { id: 'dj', text: 'Tyrone has been hanging around the DJ booth. He has requests.' },
     { id: 'bib', text: 'Tyrone has a bib now. #000. Word is he made the final.' },
     { id: 'traitor', text: 'Tyrone was seen at breakfast with {n}. Traitor!', rival: true },
     { id: 'sequins', text: 'Tyrone is wearing sequins now. Nobody knows where he got them.' },
+    { id: 'judges', text: 'Tyrone was sitting at the judges\u2019 table during prelims. Nobody moved him.' },
+    { id: 'vendor', text: 'Tyrone is at the vendor table, trying on dance shoes. Size: tiny.' },
+    { id: 'booth', text: 'Tyrone is in a photo-booth strip from last night. Four frames, four poses.' },
   ];
   // When each sighting lands in the weekend (Steve, v57): the slot it belongs to, and whether it shows once that slot
   // is over (`after`: the workshop, the DJ booth, the final) or as it starts (breakfast, dressing up on Saturday night).
@@ -712,7 +731,13 @@ const Engine = (() => {
     bib: { ok: sl => sl.round === 'Final', after: true },
     traitor: { ok: sl => /^(Sat morning|Sun morning|Sun)$/.test(sl.t), after: false },
     sequins: { ok: sl => sl.t === 'Sat night', after: false },
+    judges: { ok: sl => sl.round === 'Prelims', after: true },
+    vendor: { ok: sl => !sl.round && !sl.night && !sl.strictly, after: true },
+    booth: { ok: sl => /^(Sat morning|Sun morning|Sun)$/.test(sl.t), after: false },
   };
+  // Tyrone's state: out (seen at events), or home since the wrap-up of season `homeAt`. Older saves: home that season.
+  const tyHomeAt = t => t && (t.v ? t.homeAt : t.season);
+  const tyroneOut = s => !!s.tyrone && !tyHomeAt(s.tyrone);
   function tyroneWhen(slots, id, cur) {
     const w = TY_WHEN[id], i = pick(slots.map((sl, k) => k).filter(k => k >= cur && w.ok(slots[k])));
     return i === undefined ? { show: cur, when: '' } : { show: i + (w.after ? 1 : 0), when: slots[i].t };
@@ -724,6 +749,18 @@ const Engine = (() => {
     { text: 'You came back to a floor covered in paper cups of water, wall to wall. It took twenty minutes to reach your bed.', short: 'a floor of paper cups of water', energy: 3 },
     { text: 'Your bib was swapped for a hand-drawn one that says \u201c#1 DIVA\u201d. After searching everywhere, you found your real bib hidden underneath the gag bib.', short: 'the \u201c#1 DIVA\u201d bib' },
   ];
+  // No repeats (Steve, v58): each prank comes out of a bag, and the bag refills only once it's empty.
+  function fromBag(s, key, all) {
+    let bag = (s[key] || []).filter(x => all.includes(x)); if (!bag.length) bag = all.slice();
+    const x = pick(bag); s[key] = bag.filter(y => y !== x); return x;
+  }
+  // Your prank. Tyrone (the ducks) is the best story in the game, so if he hasn't gone missing this season
+  // it's 40% the ducks; otherwise the next prank from the bag.
+  function nextPrank(s, season) {
+    if ((!s.tyrone || tyHomeAt(s.tyrone) < season) && rnd() < MOOD.tyrone) return PRANKS.find(p => p.id === 'ducks');
+    const id = fromBag(s, 'prankBag', PRANKS.filter(p => p.id !== 'ducks').map(p => p.id));
+    return PRANKS.find(p => p.id === id);
+  }
   const SOCIAL_FLAVOR = ['Eleven songs at the Friday social. Your feet hurt in a good way.',
     'A midnight blues set taught you more about connection than any class.',
     'The DJ played three songs you had never heard. You survived all of them.'];
@@ -732,6 +769,105 @@ const Engine = (() => {
   function bib() { let b; do { b = randi(101, 499); } while (usedBibs.has(b)); usedBibs.add(b); return b; }
   function ordinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
 
+  // Traits (Steve, v58): one innate habit at character creation, one signature at the move up to Intermediate.
+  // Each is 1 of 3 random options with an upside and a catch, shown up front. The effects live where they apply
+  // (search `has(s, '`). Signature moves bend your final moments (J&J and Strictly): `edge` makes a moment of that
+  // skill land more often (negative: riskier), `miss` makes a missed one cost more with the judges, `couple` adds to
+  // your couple's stats in a final, `rescue` changes how much of a weaker partner you carry.
+  const TRAITS = {
+    butterfly: { kind: 'innate', name: 'Social Butterfly', up: 'Socials lift your motivation and community more.', catch: 'Privates land a little less.' },
+    owl: { kind: 'innate', name: 'Night Owl', up: 'Late-night socials at events cost less energy.', catch: 'Morning rounds cost more energy.' },
+    junkie: { kind: 'innate', name: 'Workshop Junkie', up: 'Event workshops teach you more.', catch: 'Weekends wear you out: you arrive with less energy.' },
+    perfect: { kind: 'innate', name: 'Perfectionist', up: 'Privates land more.', catch: 'A bad result hits your motivation harder.' },
+    showoff: { kind: 'innate', name: 'Show-Off', up: 'More Composure in finals.', catch: 'First-heat nerves at every event, not just your first.' },
+    comeback: { kind: 'innate', name: 'Comeback Kid', up: 'Near misses fire you up.', catch: 'Wins lift you less.' },
+    hustler: { kind: 'innate', name: 'Hustler', up: 'A side gig: +$20 a week.', catch: '−4 energy a week.' },
+    budget: { kind: 'innate', name: 'Budget Traveller', up: 'Travel costs a quarter less.', catch: 'Carpools and flights cost you more energy.' },
+    nerd: { kind: 'innate', name: 'Music Nerd', up: 'Musicality grows faster.', catch: 'Timing grows slower.' },
+    connector: { kind: 'innate', name: 'Natural Connector', up: 'People warm to you faster: known final partners help more, and they’re open to a Strictly sooner.', catch: 'Solo drills teach less.' },
+    habit: { kind: 'innate', name: 'Creature of Habit', up: 'The same week doesn’t wear you down.', catch: 'New things lift you less: a new practice partner, a Strictly.' },
+    homebody: { kind: 'innate', name: 'Homebody', up: 'Home socials teach more, and local events are restful.', catch: 'Away weekends are more tiring.' },
+    prankster: { kind: 'innate', name: 'Prankster', up: 'Pranks lift you more.', catch: 'Payback is likelier.' },
+    spin: { kind: 'sig', role: 'Follow', name: 'Mastered the one-foot spin', up: 'Technique moments in finals land more.', catch: 'Judges expect it now: a miss costs more.', edge: { tech: 3 }, miss: { tech: 1.6 } },
+    hijack: { kind: 'sig', role: 'Follow', name: 'Hijack royalty', up: 'Musicality moments in finals land more.', catch: 'Some leads don’t love it: Connection is riskier.', edge: { mus: 3, conn: -2 } },
+    anchor: { kind: 'sig', role: 'Follow', name: 'Anchor of steel', up: 'Your anchors never leak: Technique moments land more.', catch: 'Less playful: Musicality grows slower.', edge: { tech: 2.5 } },
+    styling: { kind: 'sig', role: 'Follow', name: 'Styling for days', up: 'Composure and presence in finals.', catch: 'Rounds cost a little more energy.', couple: { comp: 4 } },
+    chameleon: { kind: 'sig', role: 'Follow', name: 'Chameleon connection', up: 'You match any lead, light or heavy: more Connection with any partner.', catch: 'You mirror your partner: a weak one pulls you down more.', couple: { conn: 3 }, rescue: -.15 },
+    footwork: { kind: 'sig', role: 'Follow', name: 'Footwork freak', up: 'Timing moments land more (all those syncopations).', catch: 'It gets busy: Composure is riskier.', edge: { time: 3, comp: -2 } },
+    topspin: { kind: 'sig', role: 'Lead', name: 'Mastered the top-spinner', up: 'Technique moments in finals land more.', catch: 'Judges expect it now: a miss costs more.', edge: { tech: 3 }, miss: { tech: 1.6 } },
+    whip: { kind: 'sig', role: 'Lead', name: 'Whip whisperer', up: 'Connection moments in finals land more.', catch: 'Predictable: Musicality is riskier.', edge: { conn: 3, mus: -2 } },
+    breaks: { kind: 'sig', role: 'Lead', name: 'Break hunter', up: 'Musicality moments in finals land more.', catch: 'Sometimes you wait too long: Timing is riskier.', edge: { mus: 3, time: -2 } },
+    floorcraft: { kind: 'sig', role: 'Lead', name: 'Floor-craft', up: 'Calm in crowded prelims and semis.', catch: 'Plays it safe: less sparkle in a spotlight.' },
+    shine: { kind: 'sig', role: 'Lead', name: 'Makes every follow shine', up: 'You carry more of a weaker partner.', catch: 'Less focus on you: a little less presence in finals.', couple: { comp: -2 }, rescue: .12 },
+    metronome: { kind: 'sig', role: 'Lead', name: 'Metronome feet', up: 'Timing moments in finals land more.', catch: 'You don’t play with the music as much: Musicality grows slower.', edge: { time: 3 } },
+    smooth: { kind: 'sig', role: 'Lead', name: 'Smooth operator', up: 'Seamless hand changes: Connection and Technique moments land more.', catch: 'So smooth it looks easy: less sparkle in a spotlight.', edge: { conn: 2, tech: 2 } },
+    brain: { kind: 'sig', name: 'Competition brain', up: 'Spotlights don’t rattle you.', catch: 'Social floors feel flat: socials lift you less.' },
+    student: { kind: 'sig', name: 'Student of the game', up: 'Video reviews land a lot more.', catch: 'You overthink it: the first heat of each event costs more energy.' },
+    ta: { kind: 'sig', name: 'Teacher’s assistant', up: 'You assist the beginner classes: +$5 a week and more community.', catch: '−5 energy a week.' },
+    specialist: { kind: 'sig', name: 'Strictly specialist', up: 'More Connection in a Strictly with someone you know.', catch: 'A stranger in a J&J final throws you a little.' },
+    base: { kind: 'sig', name: 'The Base', up: 'You rarely make mistakes, and a chaos muppet shines off you.', catch: 'Two bases together: clean, but fewer big musical moments.', edge: { tech: 2, time: 2 } },
+    chaos: { kind: 'sig', name: 'Chaos muppet', up: 'Big musical moments, best with a solid base.', catch: 'Two chaos muppets talk over each other: more mistakes.', edge: { mus: 3 } },
+  };
+  const has = (s, id) => !!(s && s.traits && (s.traits.innate === id || s.traits.sig === id));
+  // Other dancers play like a base (Technique or Timing their strength) or a chaos muppet (Musicality), or neither.
+  const styleOf = p => !p ? null : p.strong === 'mus' ? 'chaos' : p.strong === 'tech' || p.strong === 'time' ? 'base' : null;
+  function offerTraits(s, kind) {
+    const pool = Object.keys(TRAITS).filter(id => TRAITS[id].kind === kind);
+    const ids = kind === 'innate' ? shuffle(pool).slice(0, 3)
+      : [...shuffle(pool.filter(id => TRAITS[id].role === s.role)).slice(0, 2), ...shuffle(pool.filter(id => !TRAITS[id].role)).slice(0, 1)];
+    s.traitOffer = { kind, ids };
+  }
+  function pickTrait(s, id) {
+    const o = s.traitOffer; if (!o || !o.ids.includes(id)) return false;
+    s.traits = { ...(s.traits || {}), [o.kind]: id }; s.traitOffer = null; return true;
+  }
+  // How your signature move bends a final: the edge on a moment of skill `st`, with this partner.
+  function traitEdge(s, st, partner) {
+    const t = TRAITS[s.traits && s.traits.sig], ps = styleOf(partner); let e = (t && t.edge && t.edge[st]) || 0;
+    if (has(s, 'base') && st === 'mus') e += ps === 'chaos' ? 3 : ps === 'base' ? -2 : 0;
+    if (has(s, 'chaos')) e += st === 'mus' && ps === 'base' ? 3 : (st === 'tech' || st === 'time') && ps === 'chaos' ? -3 : 0;
+    return e;
+  }
+  const traitMiss = (s, st) => { const t = TRAITS[s.traits && s.traits.sig]; return (t && t.miss && t.miss[st]) || 1; };
+  // Your couple's stats in a final, with your traits: presence, connection, and how much of a weaker partner you carry.
+  function traitCouple(s, me, partner, cs, spot) {
+    const t = TRAITS[s.traits && s.traits.sig];
+    if (t && t.couple) STATS.forEach(k => { if (t.couple[k]) cs[k] += t.couple[k]; });
+    if (t && t.rescue) STATS.forEach(k => { const a = me.stats[k], b = partner.stats[k]; if (a > b) cs[k] += t.rescue * (a - b) / 2; });
+    if (has(s, 'showoff')) cs.comp += 4;
+    if (spot && has(s, 'brain')) cs.comp += 5;
+    if (spot && (has(s, 'floorcraft') || has(s, 'smooth'))) cs.comp -= 4;
+    STATS.forEach(k => cs[k] = clamp(cs[k], 0, STAT_MAX));
+    return cs;
+  }
+  // " (Social Butterfly)": which of your traits changed this, for the line that shows it (v58: notes only when it matters).
+  const tw = (s, ...ids) => { const n = ids.filter(id => has(s, id)).map(id => TRAITS[id].name); return n.length ? ` (${n.join(', ')})` : ''; };
+  const roundEnergyWhy = (s, sl) => [has(s, 'owl') && /morning/.test(sl.t) && 'Night Owl', has(s, 'styling') && 'Styling for days', has(s, 'student') && sl.round === 'Prelims' && 'Student of the game'].filter(Boolean);
+  // The traits that change this final, in words (not the moments: those are tagged as they happen).
+  function finalTraits(s, partner, o = {}) {
+    const n = partner.name, ps = styleOf(partner), out = [], me = s.stats; // plain text: the screen escapes it
+    if (has(s, 'showoff')) out.push('Show-Off: more Composure on the floor.');
+    if (has(s, 'styling')) out.push('Styling for days: more presence.');
+    if (has(s, 'chameleon')) out.push(`Chameleon connection: you match ${n}'s connection, light or heavy.`);
+    if (has(s, 'shine') && partner.stats && STATS.some(k => me[k] > partner.stats[k])) out.push(`Makes every follow shine: you carry more of ${n}.`);
+    if (o.spot && has(s, 'brain')) out.push('Competition brain: the spotlight doesn\u2019t rattle you.');
+    if (o.spot && (has(s, 'floorcraft') || has(s, 'smooth'))) out.push(`${TRAITS[s.traits.sig].name}: less sparkle in a spotlight.`);
+    if (has(s, 'specialist')) out.push(o.strictly ? `Strictly specialist: extra Connection with ${n}.` : !o.known ? `Strictly specialist: a stranger throws you a little.` : '');
+    if (has(s, 'connector') && o.known && !o.strictly) out.push(`Natural Connector: knowing ${n} helps even more.`);
+    if (has(s, 'base') && ps) out.push(ps === 'chaos' ? `The Base: ${n} is a chaos muppet, so they'll shine off you.` : 'The Base: two bases. Clean, but quiet.');
+    if (has(s, 'chaos') && ps) out.push(ps === 'base' ? `Chaos muppet: ${n} is a solid base. Go big.` : 'Chaos muppet: two chaos muppets. Watch out.');
+    return out.filter(Boolean);
+  }
+  // A final moment your signature move swung (or a miss the judges marked harder): tag it with the trait.
+  function momentTrait(s, st, ok, partner) {
+    const t = s.traits && TRAITS[s.traits.sig]; if (!t) return null;
+    const e = traitEdge(s, st, partner);
+    return (e > 0 && ok) || (e < 0 && !ok) || (!ok && traitMiss(s, st) > 1) ? t.name : null;
+  }
+  const incomeOf = s => INCOME + (has(s, 'hustler') ? 20 : 0) + (has(s, 'ta') ? 5 : 0);
+  const weeklyDrain = s => (has(s, 'hustler') ? 4 : 0) + (has(s, 'ta') ? 5 : 0);
+  // A round's energy: Night Owls hate mornings, styling burns energy, a Student overthinks the first heat.
+  const roundEnergy = (s, sl) => ROUND_ENERGY[sl.round === 'Strictly' ? 'Final' : sl.round] + (has(s, 'owl') && /morning/.test(sl.t) ? 4 : 0) + (has(s, 'styling') ? 2 : 0) + (has(s, 'student') && sl.round === 'Prelims' ? 4 : 0);
   function newGame(name, role) {
     usedBibs.clear();
     const s = { name, role, bib: null, clsTopic: rollClass(), met: {}, week: 1, money: 350, energy: 90,
@@ -742,28 +878,13 @@ const Engine = (() => {
     s.rivalry = {}; makeCandidates(s); pickMain(s, s.cands[0], 'rival'); // the start screen lets you pick another
     s.priya = { div: 'Novice', pts: PRIYA.pts, skill: PRIYA.skill, rate: PRIYA.rate };
     s.statLog = [{ season: 1, week: 0, stats: { ...s.stats } }]; // one snapshot per week, for the end-of-season chart
+    s.traits = {}; offerTraits(s, 'innate'); // picked right after the name and role
     return s;
   }
   // After loading a saved season: remember which bibs are already taken this weekend,
   // so a final partner never gets the same number as a rival.
+  // After loading a save: bibs in use stay taken. (Saves from before v48 are no longer loaded; see `validState`.)
   function resume(s) {
-    if (!s.field) { // saves from before the living divisions: give everyone a place on the circuit
-      const t = shuffle(popTemplate().filter(x => x.div === 'Novice'));
-      (s.scene || []).forEach((d, i) => Object.assign(d, { div: 'Novice', skill: t[i % t.length].skill, rate: t[i % t.length].rate, out: t[i % t.length].out }));
-      s.ids = { scene: (s.scene || []).length, field: 0 }; s.field = makePop(s, 'field');
-      (s.rivals || []).forEach((r, i) => s.field.push({ ...newDancer('r' + i, r.name, 'Novice', 40), strong: r.strong, off: r.off, rival: true }));
-      delete s.rivals;
-    }
-    if (!s.rivalry) { // saves from before v37: your three rivals become tracked rivals, the first your main one
-      s.rivalry = {};
-      (s.field || []).filter(d => d.rival).forEach((d, i) => { d.type = i ? 'mirror' : 'main'; s.rivalry[d.id] = { name: d.name, main: !i, tone: 'rival', type: d.type, since: { season: 1, week: 1, div: 'Novice' }, w: 0, l: 0, meets: [], former: null }; });
-      if (s.moved) s.moved.seen = true;
-    }
-    if (!s.priya) s.priya = { div: 'Intermediate', pts: 0, skill: 75, rate: PRIYA.rate };
-    if (!s.cal) s.cal = makeCalendar(SUGGESTED); // saves from before the calendar
-    s.cal.forEach(c => { if (c.locked === undefined && bookBy(c) < s.week) { c.locked = true; if (c.going) c.legacy = true; } }); // saves from before booking
-    const fixNotes = res => { if (!res || !Array.isArray(res.notes) || !res.notes.some(n => typeof n === 'string')) return; res.rivalMiles = res.notes.filter(n => typeof n === 'string').map(text => ({ text })); res.notes = res.notes.filter(n => typeof n !== 'string'); };
-    if (s.wk) fixNotes(s.wk.res);
     usedBibs.clear(); if (s.bib) usedBibs.add(s.bib);
     if (s.wk) [...s.wk.res.rivals, ...(s.wk.res.partners || []), ...(s.wk.res.others || [])].forEach(r => usedBibs.add(r.bib));
   }
@@ -837,13 +958,15 @@ const Engine = (() => {
   // around Keen. Gains are ×1 at `mid` (a sensible, varied player's usual level), up to +15% at max, −15% at min.
   const MOOD = { start: 70, min: 40, max: 100, mid: 76, rest: 68, pull: .2, effect: .15, same: 5, rut: 10, rutAt: 3, money: 3, social: 2, mock: 1,
     leah: 2, restLow: 2, newPal: 4, skipBelow: 50, skipChance: .2, firedUp: 85, season: 75,
-    smug: .15, smugWeeks: 2, near: 1, win: 8, asHoped: 3, nearMiss: 6, flop: 10, h2hWin: 2, h2hLoss: 2, evSocial: 1, prank: 5, pranked: 3, prankChance: .25, paybackChance: .6 };
+    smug: .15, smugWeeks: 2, near: 1, win: 8, asHoped: 3, nearMiss: 6, flop: 10, h2hWin: 2, h2hLoss: 2, evSocial: 1, prank: 5, pranked: 3, prankChance: .25, paybackChance: .6, tyrone: .4 };
   const MOOD_WORDS = [[85, 'Fired up'], [70, 'Keen'], [55, 'Going through the motions'], [0, 'Burnt out']];
   const moodOf = s => s.mood === undefined ? MOOD.start : s.mood;
   // Complacency (v53, Steve): two wins in a row and training lands 15% less for 2 weeks, until anything but a win.
   const isSmug = s => !!(s.complacent && absWeek(s) <= s.complacent.until);
   const moodWord = s => MOOD_WORDS.find(([at]) => moodOf(s) >= at)[1];
   const moodMult = s => { const m = moodOf(s); return 1 + MOOD.effect * (m - MOOD.mid) / (m >= MOOD.mid ? MOOD.max - MOOD.mid : MOOD.mid - MOOD.min); };
+  // Socials lift a Social Butterfly more, and a Competition brain less.
+  const socialLift = (s, n) => Math.round((n + (has(s, 'butterfly') ? 2 : 0)) * (has(s, 'brain') ? .5 : 1));
   function moodShift(s, n, why, log) {
     const before = moodOf(s); s.mood = clamp(before + n, MOOD.min, MOOD.max);
     const got = s.mood - before; if (got && log) log.push({ n: got, why }); return got;
@@ -856,10 +979,20 @@ const Engine = (() => {
     const ka = planKey(a).split('|'), kb = planKey(b).split('|');
     return ka.reduce((n, x, i) => n + (x !== kb[i] ? 1 : 0), 0) + (ka[1] === 'partner' && kb[1] === 'partner' && a.prac !== b.prac ? .5 : 0);
   }
+  function traitGain(s, st, src) {
+    let m = 1;
+    if (has(s, 'nerd')) m *= st === 'mus' ? 1.2 : st === 'time' ? .85 : 1;
+    if ((has(s, 'anchor') || has(s, 'metronome')) && st === 'mus') m *= .85;
+    if (has(s, 'connector') && src === 'solo') m *= .8;
+    if (has(s, 'homebody') && src === 'social') m *= 1.2;
+    if (has(s, 'junkie') && (src === 'workshop' || src === 'star' || src === 'starRare')) m *= 1.3;
+    if (src === 'private' || src === 'pro') m *= (has(s, 'perfect') ? 1.2 : 1) * (has(s, 'butterfly') ? .85 : 1);
+    return m;
+  }
   function gain(s, st, base, src, into) {
     const f = src === true ? 1 : teach(s.stats[st], levelOf(s, src, st));
     const fm = s.focus && s.focus.stat === st && s.week <= s.focus.until ? 1.5 : 1;
-    const mm = src === true ? 1 : moodMult(s) * (isSmug(s) ? 1 - MOOD.smug : 1); // motivation (and complacency) scale training
+    const mm = src === true ? 1 : moodMult(s) * (isSmug(s) ? 1 - MOOD.smug : 1) * traitGain(s, st, src); // motivation (and complacency, and traits) scale training
     const x = base * f * fm * mm, whole = Math.floor(x);
     const before = s.stats[st]; s.stats[st] = Math.min(STAT_MAX, before + whole + (rnd() < x - whole ? 1 : 0));
     const got = s.stats[st] - before;
@@ -887,6 +1020,7 @@ const Engine = (() => {
     if (p.priv) { money += privatePrice(s); energy += PRIVATE_ENERGY; }
     if (p.social && socialAvailable(s)) { money += SOCIAL.cost; energy += SOCIAL.energy; }
     if (p.social && socialAvailable(s) && p.mock && mockAvailable(s)) { money += MOCK.cost; energy += MOCK.energy; }
+    energy += weeklyDrain(s); // a side gig or assisting classes
     return { money, energy };
   }
   function scGainOf(s, p) { return (p.cls ? SC.cls : 0) + (p.social && socialAvailable(s) ? SC.social : 0) + (p.social && p.mock && mockAvailable(s) ? SC.mock : 0); }
@@ -974,15 +1108,20 @@ const Engine = (() => {
         items.push({ day: 'Fri', title: 'Mock J&J night', d: d2, note: 'Your community ran practice heats with random partners and random songs. Next week will feel familiar.', tone: 'good' });
       }
     }
-    const scg = scGainOf(s, p) + (scGainOf(s, p) && moodOf(s) >= MOOD.firedUp ? 2 : 0); // fired up: you light up the room
+    const scg = scGainOf(s, p) + (scGainOf(s, p) && moodOf(s) >= MOOD.firedUp ? 2 : 0) // fired up: you light up the room
+      + (has(s, 'butterfly') && p.social && socialAvailable(s) ? 2 : 0) + (has(s, 'ta') ? 1 : 0);
     s.sc = Math.min(100, s.sc + scg);
-    if (!evWeek && diff === 0) moodShift(s, -(MOOD.same + (s.moodRun >= MOOD.rutAt ? MOOD.rut : 0)), s.moodRun >= MOOD.rutAt ? `the same week, ${s.moodRun} in a row` : 'the same week as last week', moods);
+    if (has(s, 'habit')) { /* a Creature of Habit doesn't mind the same week */ }
+    else if (!evWeek && diff === 0) moodShift(s, -(MOOD.same + (s.moodRun >= MOOD.rutAt ? MOOD.rut : 0)), s.moodRun >= MOOD.rutAt ? `the same week, ${s.moodRun} in a row` : 'the same week as last week', moods);
     else if (!evWeek && diff <= 1) moodShift(s, -MOOD.near - (diff <= .5 && s.moodRun >= MOOD.rutAt ? MOOD.same : 0), diff <= .5 && s.moodRun >= MOOD.rutAt ? `the same routine, ${s.moodRun} weeks running` : 'nearly the same week again', moods);
-    if (p.social && socialAvailable(s)) moodShift(s, MOOD.social + (p.mock && mockAvailable(s) ? MOOD.mock : 0), 'the Friday social', moods);
+    if (p.social && socialAvailable(s)) moodShift(s, socialLift(s, MOOD.social + (p.mock && mockAvailable(s) ? MOOD.mock : 0)), 'the Friday social' + tw(s, 'butterfly', 'brain'), moods);
     if (p.prac === 'lena') moodShift(s, MOOD.leah, named(s, 'practice with {lena}'), moods);
     if (p.prac === 'rest' && moodOf(s) < 60) moodShift(s, MOOD.restLow, 'a night off', moods);
     if (spare(s) < 40) moodShift(s, -MOOD.money, 'money is tight', moods);
 
+    if (has(s, 'hustler')) items.push({ day: '', title: 'Side gig (Hustler)', d: {}, note: 'Weekend deliveries: +$20 on payday, \u22124 energy.', tone: 'meh' });
+    if (has(s, 'ta')) items.push({ day: '', title: 'Assisting the beginner class (Teacher\u2019s assistant)', d: {}, note: '+$5 on payday and a little community, \u22125 energy.', tone: 'meh' });
+    if (has(s, 'habit') && !evWeek && diff <= 1) items.push({ day: '', title: 'Creature of Habit', d: {}, note: 'Much the same week again, and you like it that way. No motivation lost.', tone: 'meh' });
     const rm = rivalMoment(s, p); if (rm) items.push(rm);
     if (!items.length) items.push({ day: '', title: 'A quiet week', d: {}, note: 'Nothing booked. Your body thanks you.', tone: 'meh' });
     s.lastPlan = { ...planned };
@@ -995,7 +1134,7 @@ const Engine = (() => {
   function rollClass() { const stat = pick(STATS); return { stat, name: pick(CLASS_TOPICS[stat]) }; }
   function endWeek(s, seasonBreak) {
     // Priya competes at the circuit's events even when you don't go.
-    const ce = (s.cal || []).find(c => c.week === s.week && !EVENTS[c.id].late);
+    const ce = (s.cal || []).find(c => c.week === s.week);
     if (ce && !seasonBreak && !(s.wk && s.wk.res.week === s.week && (s.wk.res.season || 1) === (s.season || 1))) { const ev = entry({ div: s.priya.div }, ce); if (POP[ev.div]) { agePop(s); applyPriya(s, priyaRoll(s, ev), ev); } }
     if (s.priya && POP[s.priya.div]) s.priya.skill = r1(s.priya.skill + POP.gain * s.priya.rate * teach(s.priya.skill, POP[s.priya.div].level));
     const log = (s.statLog = s.statLog || []), last = log[log.length - 1];
@@ -1003,14 +1142,14 @@ const Engine = (() => {
     if (!seasonBreak && s.week >= WEEKS) { endSeason(s); return; } // the last week had no event for you
     const socialed = !!(s.lastPlan && s.lastPlan.social);
     if (!seasonBreak) processBookings(s);
-    s.week += 1; s.money += INCOME; s.energy = Math.min(100, s.energy + RECOVER);
+    s.week += 1; s.money += incomeOf(s); s.energy = Math.min(100, s.energy + RECOVER);
     s.sc = Math.max(0, s.sc - SC.decay);
     s.pals = s.pals || {};
     const first = (s.season || 1) === 1;
     if (!s.pals.priya && (!first || s.week >= 2)) s.pals.priya = { at: absWeek(s), social: socialed, cls: !!(s.lastPlan && s.lastPlan.cls) };
     s.lenaInTown = first && s.week < 4 ? false : !s.pals.lena ? true : rnd() < lenaChance(s, socialed); // her first ask is week 4
     if (s.lenaInTown && !s.pals.lena) s.pals.lena = { at: absWeek(s) };
-    for (const k of ['priya', 'lena', 'dev']) if (s.pals[k] && !s.pals[k].lift && s.pals[k].at <= absWeek(s)) { s.pals[k].lift = true; moodShift(s, MOOD.newPal); } // a new practice partner
+    for (const k of ['priya', 'lena', 'dev']) if (s.pals[k] && !s.pals[k].lift && s.pals[k].at <= absWeek(s)) { s.pals[k].lift = true; moodShift(s, has(s, 'habit') ? Math.round(MOOD.newPal / 2) : MOOD.newPal); } // a new practice partner
     s.evt = seasonBreak ? null : rollEvent(s); // no offer (or its instant money) across the season break
     s.clsTopic = rollClass();
   }
@@ -1244,7 +1383,7 @@ const Engine = (() => {
     'Bestie': {
       win: ['You beat {n} at {ev}. {n} is thrilled for you. Mostly.', 'Round to you. {n} made you promise to teach that move.'],
       loss: ['{n} beat you at {ev}. You’re genuinely happy for {n}. Mostly.', '{n} takes this one. You’ll hear about it at brunch.'],
-      pre: ['You and {n} matched outfits without planning it.', '{n} fixed your collar before the prelims.', '{n} ran across the lobby to hug you before you even got your bib.', '{n} already knows your heat time. And your snack plan.', 'You and {n} took a registration-desk selfie. Tradition.', '{n} brought you the good bobby pins. Or the good shoe brush. Whatever you needed.'],
+      pre: ['You and {n} matched outfits without planning it.', '{n} fixed your collar before the prelims.', '{n} ran across the lobby to hug you before you even got your bib.', '{n} texted you a good-luck GIF before you even parked.', 'You and {n} took a registration-desk selfie. Tradition.', '{n} brought you the good bobby pins. Or the good shoe brush. Whatever you needed.'],
       recap: ['{n} asked which workshops you’re taking at {nev}. You compared plans.', '{n} sent you a four-minute voice memo about one song.', 'You and {n} split fries after {at} and talked about {nev}.', '{n} texted: “outfit check for {nev}?” Yes. Always.', 'You and {n} split a playlist for the drive to {nev}.', '{n} held your spot in line at {at}. Of course.', 'You and {n} talked for an hour in the parking lot after {at}.', '{n} remembered your Monday was rough and saved you a dance.'] },
   };
   VOICE.rival = { win: ['You beat {n} at {ev}.', 'Round to you at {ev}.'], loss: ['{n} beat you at {ev}. Next time.', '{n} takes this one.'], pre: ['{n} is here.', '{n} is warming up across the room.', '{n} is in the registration line. You notice. You always notice.', 'You saw {n}\u2019s name on the heat sheet.'], recap: VOICE['Arch-rival'].recap };
@@ -1284,7 +1423,7 @@ const Engine = (() => {
     'Hype buddy': {
       win: ['You beat {n} at {ev} and {n} posted about it before you did.', '{n} lost the head-to-head and still gave the loudest whoop of the night.'],
       loss: ['{n} beat you at {ev}, then told everyone your dance was the best of the round.', '{n} won, then made you take a victory selfie together anyway.'],
-      pre: ['{n} knows your bib number by heart. Already.', '{n} is introducing you to strangers in the lobby like you’re the headliner.', '{n}: “Big energy only this weekend.”'],
+      pre: ['{n} made you a sign. It has glitter on it.', '{n} is introducing you to strangers in the lobby like you’re the headliner.', '{n}: “Big energy only this weekend.”'],
       recap: ['{n} sent you a clip of your best moment from {at}. In slow motion.', '{n} told everyone at {at} it was your birthday. It isn’t.', '{n} started a countdown to {nev}. It’s in the group chat.', '{n} danced so hard at {at} they lost a shoe. Iconic.'] },
     'Cheerleader': {
       win: ['You beat {n} at {ev}. {n} cried more than you did.', '{n} hugged you before the results were even read out.'],
@@ -1486,7 +1625,8 @@ const Engine = (() => {
   const listNames = a => a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : a[0] || '';
   // How many dances together before someone is open to a Strictly with you (hidden, 2-5, usually 2-3).
   const openAt = (s, id) => { s.openAt = s.openAt || {}; if (s.openAt[id] === undefined) s.openAt[id] = pick(STRICTLY.open); return s.openAt[id]; };
-  const isOpen = (s, p) => p.id !== undefined && metWhere(s, p).length >= openAt(s, p.id);
+  const isOpen = (s, p) => p.id !== undefined && metWhere(s, p).length >= Math.max(1, openAt(s, p.id) - (has(s, 'connector') ? 1 : 0));
+  const familiarStep = s => has(s, 'connector') ? 6 : FAMILIAR; // couple Connection per earlier dance together
   const PRELIM_W = { time: .24, tech: .24, conn: .24, mus: .16, comp: .12 };
   // How much a heat comes down to the day: judges disagree, partners vary, a song suits you. Scales the random
   // part of prelim and semifinal scores (yours is softened by Composure).
@@ -1567,7 +1707,7 @@ const Engine = (() => {
       pulledIn = altNo > 0 && advancers.some(c => c.isPlayer);
     }
     const into = new Set(advancers);
-    const sheet = rows.map((r, i) => ({ bib: r.x.c.bib, name: r.x.c.name, me: !!r.x.c.isPlayer, rival: !!r.x.c.rival, ...(r.x.c.priya ? { priya: true } : {}), marks: r.marks, sum: r.sum,
+    const sheet = rows.map((r, i) => ({ bib: r.x.c.bib, name: r.x.c.name, me: !!r.x.c.isPlayer, rival: !!r.x.c.rival, ...(r.x.c.priya ? { priya: true } : {}), ...(r.x.c.lead && (r.x.c.lead.dv || r.x.c.follow.dv) ? { pair: [r.x.c.lead, r.x.c.follow].map(d => ({ name: d.name, dv: d.dv })) } : {}), marks: r.marks, sum: r.sum,
       ...(gone.has(r.x.c) ? { withdrew: true } : {}), ...(i >= cut && i < cut + 3 ? { alt: i - cut + 1, ...(into.has(r.x.c) ? { in: true } : {}) } : {}) }));
     return { advancers, info: { name, next, size: pool.length, cut, rank, advanced: rank <= cut || pulledIn, alternate, altNo, withdrew, pulledIn, bibs: advancers.map(c => c.bib).sort((a, b) => a - b), sheet } };
   }
@@ -1632,7 +1772,7 @@ const Engine = (() => {
   }
   function startEvent(s, opts = {}) {
     const ev = eventAt(s, s.week), c = s.cal.find(x => x.id === ev.id && x.week === ev.week);
-    const price = priceOf(s, ev); if (c.legacy && (s.passes || 0) > 0) s.passes--;
+    const price = priceOf(s, ev);
     s.money -= price; c.done = true;
     const carpool = !!s.carpool; if (carpool) { s.carpool = false; s.money += 40; s.energy = Math.max(0, s.energy - 8); }
     if (opts.single && (STORE_WK.single.price > spare(s) || ev.travel === 'home')) opts = { ...opts, single: false };
@@ -1717,6 +1857,17 @@ const Engine = (() => {
       news.push({ tone: 'bad', tag: 'Hotel', text: 'Your roommate snores like a leaf blower. Friday night will cost you 10 extra energy, whatever you do.' });
     }
     if (carpool) news.push({ tag: 'Travel', text: 'You carpooled: $40 cheaper, but six hours in the back seat. −8 energy.' });
+    // Traits at check-in (v58): weekends tire a Workshop Junkie, long trips a Budget Traveller, away events a Homebody.
+    const tired = [];
+    if (has(s, 'junkie')) tired.push(['Workshop Junkie', 6, 'You\u2019ve had your workshop schedule colour-coded for weeks. You arrive already wound up.']);
+    if (has(s, 'budget') && (ev.travel === 'fly' || ev.travel === 'carpool')) tired.push(['Budget Traveller', 6, `The cheap ${ev.travel === 'fly' ? 'flight had two layovers' : 'route took the long way round'}, but you saved $${EVENTS[ev.id].trip - ev.trip}.`]);
+    else if (has(s, 'budget') && EVENTS[ev.id].trip > ev.trip) news.push({ tone: 'good', tag: 'Budget Traveller', text: `You found the cheap way there: $${EVENTS[ev.id].trip - ev.trip} saved.` });
+    if (has(s, 'homebody')) tired.push(ev.travel === 'home' ? ['Homebody', -5, 'Your own bed, your own coffee.'] : ['Homebody', 5, 'You miss your own bed already.']);
+    tired.forEach(([tag, n, text]) => { s.energy = clamp(s.energy - n, 0, 100); news.push({ tone: n > 0 ? 'bad' : 'good', tag, text: `${text} ${n > 0 ? '\u2212' : '+'}${Math.abs(n)} energy.` }); });
+    if (has(s, 'showoff')) { // a Show-Off gets first-heat nerves at every event
+      if (s.heatDone && ev.field > 8) news.push({ tone: 'bad', tag: 'Show-Off', text: 'You want to impress, so the first-heat nerves are back for the prelims.' });
+      s.heatDone = false;
+    }
     if (opts.single) { s.money -= STORE_WK.single.price; s.energy = Math.min(100, s.energy + 10); news.push({ tone: 'good', tag: 'Hotel', text: 'Single room: you slept properly (+10 energy), and naps here start at +20 instead of +15.' }); }
     // How you felt you'd do: your place among this field by skill (you can't see it, but you sense it).
     res.expect = 1 + rivals.filter(x => weighted(x.stats, PRELIM_W) > weighted(s.stats, PRELIM_W)).length;
@@ -1724,22 +1875,27 @@ const Engine = (() => {
     // The room you pranked last time gets you back at your next shared-room event (Steve, v56): once, and likelier.
     const pb = shared && s.payback && s.payback.at < absWeek(s) ? s.payback : null; if (shared && s.payback) s.payback = null;
     let prankedBy = null;
-    if (shared && rnd() < (pb ? MOOD.paybackChance : MOOD.prankChance)) { // someone from your community got you
-      const pr = pick(PRANKED), nights = slots.map((sl, i) => i).filter(i => slots[i].night && i < slots.length - 1 && i >= cur);
+    if (shared && rnd() < (pb ? MOOD.paybackChance : MOOD.prankChance) + (has(s, 'prankster') ? .2 : 0)) { // someone from your community got you
+      const pr = PRANKED[fromBag(s, 'prankedBag', PRANKED.map((x, i) => i))], nights = slots.map((sl, i) => i).filter(i => slots[i].night && i < slots.length - 1 && i >= cur);
       const lead = pb ? (pb.by ? `Payback, courtesy of ${pb.by}: ` : `Payback from the room you pranked at ${pb.ev}: `) : '';
       prankedBy = { at: nights.length ? nights[PRANKED.indexOf(pr) % nights.length] : -1, text: lead + (lead ? pr.text.charAt(0).toLowerCase() + pr.text.slice(1) : pr.text), energy: pr.energy || 0, payback: !!pb, short: pr.short, from: pb ? pb.by || `the room you pranked at ${pb.ev}` : null, done: false };
     }
     const here = activeRivals(s).filter(d => d.div === ev.div ? rv.includes(d) : attends(s, ev, d)).map(d => d.id);
-    // Tyrone turns up at your later events that season: one sighting each, ones you haven't seen first.
-    let tyrone = null;
-    if (s.tyrone && s.tyrone.season === (s.season || 1) && s.tyrone.ev !== ev.name) {
-      const seen = s.tyroneSeen || [], ok = TYRONE.filter(t => !t.rival || here.length), fresh = ok.filter(t => !seen.includes(t.id));
-      const t = pick(fresh.length ? fresh : ok), who = t.rival && s.rivalry[here[0]] ? s.rivalry[here[0]].name : '';
-      tyrone = { id: t.id, text: t.text.replace('{n}', who), ...tyroneWhen(slots, t.id, cur) }; s.tyrone.sightings++;
-      s.tyroneSeen = fresh.length ? [...seen, t.id] : [t.id];
+    // Tyrone turns up at your later events: up to two sightings a weekend, at different moments, ones you haven't seen first.
+    const tyrones = [];
+    if (tyroneOut(s) && s.tyrone.at !== absWeek(s)) {
+      const ok = TYRONE.filter(t => (!t.rival || here.length) && slots.some((sl, k) => k >= cur && TY_WHEN[t.id].ok(sl)));
+      for (let k = 0; k < 2 && s.tyrone.sightings < TY_SIGHTINGS; k++) {
+        const seen = s.tyroneSeen || [], free = ok.filter(t => !tyrones.some(x => x.id === t.id)), fresh = free.filter(t => !seen.includes(t.id));
+        const t = pick(fresh.length ? fresh : free); if (!t) break;
+        const w = tyroneWhen(slots, t.id, cur); if (tyrones.some(x => x.when === w.when)) continue; // one sighting per moment
+        tyrones.push({ id: t.id, text: t.text.replace('{n}', t.rival && s.rivalry[here[0]] ? s.rivalry[here[0]].name : ''), ...w }); s.tyrone.sightings++;
+        s.tyroneSeen = fresh.length ? [...seen, t.id] : [t.id];
+      }
+      if (s.tyrone.sightings >= TY_SIGHTINGS) s.tyrone.homeAt = s.season || 1; // back in time for the season wrap-up
     }
     const strictly = sx >= 0 ? strictlyAt(s, ev, slots[sx], sx, news) : null;
-    s.wk = { res, slots, cur, pro, news, strictly, awardsAt: slots.findIndex(sl => sl.t === 'Sun night'), awarded: false, privUsed: false, single: !!opts.single, shared, pranked: false, prankedBy, here, tyrone, moods: wkMoods, snacks: 0, crash: false, start: { stats: { ...s.stats }, sc: s.sc, energy: s.energy, money: s.money }, finished: false };
+    s.wk = { res, slots, cur, pro, news, strictly, awardsAt: slots.findIndex(sl => sl.t === 'Sun night'), awarded: false, privUsed: false, single: !!opts.single, shared, pranked: false, prankedBy, here, tyrones: tyrones.sort((a, b) => a.show - b.show), moods: wkMoods, snacks: 0, crash: false, start: { stats: { ...s.stats }, sc: s.sc, energy: s.energy, money: s.money }, finished: false };
     if (prankedBy && prankedBy.at < 0) springPrank(s, true); // no night left (you got in late): it happens now
     return s.wk;
   }
@@ -1756,8 +1912,8 @@ const Engine = (() => {
   // Partners: {priya} at full chemistry (sometimes already entered with someone else), or anyone you've danced with
   // enough that they're open to it. You pay your half of the entry; prizes are split. No WSDC points.
   const STRICTLY = { tier: 2, chem: 3, busy: .4, open: [2, 2, 2, 2, 3, 3, 3, 4, 4, 5], show: 4,
-    fee: { 2: 40, 3: 50, 4: 70 }, prize: { 2: [80, 40, 20], 3: [120, 60, 30], 4: [200, 100, 50] }, couples: { 2: 7, 3: 12, 4: 13 },
-    top: .5, nov: .6, theirs: [6, 12], mood: 6, comp: 1 };
+    fee: { 2: 40, 3: 50, 4: 70 }, prize: { 2: [120, 60, 30], 3: [180, 90, 45], 4: [300, 150, 75] }, couples: { 2: 7, 3: 12, 4: 13 },
+    top: .5, nov: .5, theirs: [6, 12], mood: 6, comp: 1 };
   const DIVS_STRICTLY = ['Novice', 'Intermediate'];
   function strictlyAt(s, ev, sl, at, news) {
     const tier = ev.tier, st = { at, t: sl.t, tier, combined: tier < 4, fee: STRICTLY.fee[tier], prize: STRICTLY.prize[tier], size: STRICTLY.couples[tier], entered: null, result: null };
@@ -1775,7 +1931,7 @@ const Engine = (() => {
     if (s.chem >= STRICTLY.chem && !st.priyaBusy && DIVS_STRICTLY.includes(s.priya.div)) out.push({ id: 'priya', name: named(s, '{priya}'), priya: true, div: s.priya.div, bonus: FAMILIAR_CAP, word: 'You click', times: 0 });
     const met = (wk.res.others || []).filter(p => !p.priya && isOpen(s, p)).map(p => {
       const n = metWhere(s, p).length;
-      return { id: p.id, name: p.name, div: ev.div, bonus: Math.min(FAMILIAR_CAP, FAMILIAR * n), word: n >= 5 ? 'You click' : n >= 3 ? 'Good fit' : 'Still learning each other', times: n };
+      return { id: p.id, name: p.name, div: ev.div, bonus: Math.min(FAMILIAR_CAP, familiarStep(s) * n), word: n >= 5 ? 'You click' : n >= 3 ? 'Good fit' : 'Still learning each other', times: n };
     }).sort((a, b) => b.times - a.times);
     return [...out, ...met].slice(0, STRICTLY.show + out.length);
   }
@@ -1787,7 +1943,7 @@ const Engine = (() => {
     if (!p || half > spare(s)) return false;
     s.money -= half; st.paid = half;
     const o = p.priya ? priyaDancer(s) : wk.res.others.find(x => x.id === p.id);
-    st.entered = { ...p, stats: { ...o.stats }, strong: o.strong, div: strictlyDiv(st, p, wk.res.ev) };
+    st.entered = { ...p, stats: { ...o.stats }, strong: o.strong, div: strictlyDiv(st, p, wk.res.ev), own: p.div };
     wk.slots[st.at].round = 'Strictly';
     return true;
   }
@@ -1799,18 +1955,23 @@ const Engine = (() => {
     const keen = l => DIVS_STRICTLY.flatMap(dv => { const x = l.filter(d => d.div === dv).sort((a, b) => b.skill - a.skill); return x.slice(0, Math.ceil(x.length * STRICTLY.top)); });
     const here = new Set((s.wk && s.wk.here) || []), skip = st.entered ? st.entered.id : null;
     const mine = shuffle(keen(s.field.filter(d => (!d.rival || here.has(d.id)) && d.id !== st.priyaPal))), theirs = shuffle(keen(s.scene.filter(d => d.id !== skip)));
-    const tag = d => ({ name: d.name, ...(d.rival ? { rival: true } : {}), ...(d.priya ? { priya: true } : {}) });
-    const couple = (a, b, div) => { // a is in your role, b in the other
+    const tag = (d, dv) => ({ name: d.name, ...(st.combined && dv ? { dv } : {}), ...(d.rival ? { rival: true } : {}), ...(d.priya ? { priya: true } : {}) });
+    // A combined Strictly is for fun (Steve, v58): each dancer is Novice or Intermediate 50/50, so about half the couples
+    // are mixed. A couple dances in the higher partner's division.
+    const couple = (a, b, div, da = div, db = div) => { // a is in your role, b in the other
       const cs = coupleStats(a, b); cs.conn = Math.min(STAT_MAX, cs.conn + rand(...STRICTLY.theirs));
       const lead = s.role === 'Lead' ? a : b, follow = s.role === 'Lead' ? b : a;
-      return { name: `${lead.name} & ${follow.name}`, lead: tag(lead), follow: tag(follow), bib: bib(), stats: cs, div, ...(a.rival ? { rival: true } : {}), ...(b.priya ? { priya: true } : {}) };
+      const [dl, df] = s.role === 'Lead' ? [da, db] : [db, da];
+      return { name: `${lead.name} & ${follow.name}`, lead: tag(lead, dl), follow: tag(follow, df), bib: bib(), stats: cs, div, ...(a.rival ? { rival: true } : {}), ...(b.priya ? { priya: true } : {}) };
     };
     const out = [], pd = s.priya && s.priya.div, pal = st.priyaPal !== undefined && s.field.find(d => d.id === st.priyaPal);
-    if (pal && (st.combined || pd === div0)) out.push(couple({ ...sceneDancer(pal), rival: false }, priyaDancer(s), pd));
+    const higher = (x, y) => DIV_ORDER.indexOf(x) > DIV_ORDER.indexOf(y) ? x : y;
+    if (pal && (st.combined || pd === div0)) out.push(couple({ ...sceneDancer(pal), rival: false }, priyaDancer(s), higher(pal.div, pd), pal.div, pd));
+    const roll = () => st.combined ? (rnd() < STRICTLY.nov ? 'Novice' : 'Intermediate') : div0;
     while (out.length < n) {
-      const div = st.combined ? (rnd() < STRICTLY.nov ? 'Novice' : 'Intermediate') : div0;
-      const take = (l, mean) => { const k = l.findIndex(d => d.div === div); return k >= 0 ? sceneDancer(l.splice(k, 1)[0]) : makeNPC(mean); };
-      out.push(couple(take(mine, POP[div].level), take(theirs, POP[div].level), div));
+      const da = roll(), db = roll();
+      const take = (l, dv) => { const k = l.findIndex(d => d.div === dv); return k >= 0 ? sceneDancer(l.splice(k, 1)[0]) : makeNPC(POP[dv].level); };
+      out.push(couple(take(mine, da), take(theirs, db), higher(da, db), da, db));
     }
     return shuffle(out);
   }
@@ -1835,8 +1996,9 @@ const Engine = (() => {
   function danceStrictly(s) {
     const wk = s.wk, st = wk.strictly, p = st.entered, ef = energyFactor(s.energy);
     const floor = { ...s.stats }; if (s.gear.outfit) floor.comp = Math.min(STAT_MAX, floor.comp + 6);
-    const cs = coupleStats({ stats: floor }, { stats: p.stats }); cs.conn = Math.min(STAT_MAX, cs.conn + p.bonus);
-    const you = { name: s.name }, pt = { name: p.name, ...(p.priya ? { priya: true } : {}) };
+    const cs = coupleStats({ stats: floor }, { stats: p.stats }); cs.conn = Math.min(STAT_MAX, cs.conn + p.bonus + (has(s, 'specialist') ? 4 : 0));
+    traitCouple(s, { stats: floor }, p, cs, false);
+    const you = { name: s.name }, pt = { name: p.name, ...(st.combined && p.own ? { dv: p.own } : {}), ...(p.priya ? { priya: true } : {}) };
     const me = { name: `${s.name} & ${p.name}`, lead: s.role === 'Lead' ? you : pt, follow: s.role === 'Lead' ? pt : you, bib: s.bib, stats: cs, isPlayer: true, div: p.div };
     const r = st.result = st.result || { size: st.size, label: p.div, partner: p.name, priya: !!p.priya, out: false, done: false, energy: 0 };
     const spend = n => { s.energy = Math.max(0, s.energy - n); r.energy += n; if (wk.crash) { s.energy = Math.max(0, s.energy - 20); wk.crash = false; wk.crashed = true; } };
@@ -1844,7 +2006,7 @@ const Engine = (() => {
       const field = [me, ...strictlyField(s, st, st.size - 1, p.div)];
       if (field.length > 8) {
         const pr = cutRound('Strictly prelims', 'Final', field, 8, c => weighted(c.stats, PRELIM_W) * (c.isPlayer ? ef : 1) + gauss() * 4 * LUCK * PRE_SHARED * (c.isPlayer ? Math.max(.2, 1 - c.stats.comp / 150) : 1));
-        r.prelim = pr.info; spend(ROUND_ENERGY.Prelims);
+        r.prelim = pr.info; spend(ROUND_ENERGY.Prelims + roundEnergy(s, { round: 'Final', t: wk.slots[wk.cur].t }) - ROUND_ENERGY.Final);
         if (!pr.info.advanced) { Object.assign(r, { out: true, rank: pr.info.rank }); return endStrictly(s); }
         st.pool = pr.advancers.map(c => c.isPlayer ? { isPlayer: true } : c);
         return { round: 'Strictly', stage: 'prelim', advanced: true, rank: pr.info.rank, size: field.length };
@@ -1857,22 +2019,24 @@ const Engine = (() => {
     const pc = couples.find(c => c.isPlayer), moments = [];
     for (let i = 0; i < 6; i++) {
       const si = Math.floor(i / 2), stt = i === 5 ? 'comp' : weightedPick(songW(songs[si])), mine = pc.stats[stt] * (stt === 'comp' ? 1 : ef);
-      const ok = rnd() < sigmoid((mine - fm[stt]) / 5);
-      moments.push({ stat: stt, ok, text: pick(PHRASES[stt][ok ? 'good' : 'bad']), song: si });
+      const ok = rnd() < sigmoid((mine - fm[stt] + traitEdge(s, stt, p)) / 5);
+      const tr = momentTrait(s, stt, ok, p);
+      moments.push({ stat: stt, ok, text: pick(PHRASES[stt][ok ? 'good' : 'bad']), song: si, ...(tr ? { trait: tr } : {}) });
     }
+    pc.mw = moments.map(m => m.ok ? 1 : traitMiss(s, m.stat));
     const { ranks, order } = judgeCouples(couples, moments, fm, ef, JUDGING.floor);
     const mineK = {}; STATS.forEach(k => mineK[k] = pc.stats[k] * (k === 'comp' ? 1 : ef));
     const place = order.indexOf(couples.indexOf(pc)) + 1, prize = Math.round((st.prize[place - 1] || 0) / 2);
     Object.assign(r, { place, prize, songs, moments, fit: songs.map(so => songFit(songW(so), mineK, fm)),
       table: order.map((i, k) => ({ place: k + 1, isPlayer: !!couples[i].isPlayer, ranks: ranks[i], why: order.why[i], lead: { ...couples[i].lead, bib: couples[i].bib }, follow: { ...couples[i].follow, bib: couples[i].bib } })) });
     r.pending = true; // handed out at the awards
-    spend(ROUND_ENERGY.Final);
+    spend(roundEnergy(s, { round: 'Final', t: wk.slots[wk.cur].t }));
     return endStrictly(s);
   }
   function endStrictly(s) {
     const wk = s.wk, sl = wk.slots[wk.cur], st = wk.strictly, r = st.result, p = st.entered;
     r.done = true; r.moods = [];
-    moodShift(s, STRICTLY.mood, `dancing the Strictly with ${p.name}`, r.moods);
+    moodShift(s, has(s, 'habit') ? Math.round(STRICTLY.mood / 2) : STRICTLY.mood, `dancing the Strictly with ${p.name}` + tw(s, 'habit'), r.moods);
     (wk.moods = wk.moods || []).push(...r.moods);
     r.d = {}; gain(s, 'comp', STRICTLY.comp, true, r.d);
     if (!p.priya) meet(s, p, `${wk.res.ev.name} Strictly`);
@@ -1899,7 +2063,7 @@ const Engine = (() => {
       fri ? `A shorter night as people get in. Connection, musicality, timing, community +6, and a few faces you might draw in a final.`
         : sun ? `The last dance of the weekend, and often the best. Connection, musicality, timing, community +6, and faces you\u2019ll see (and might draw) at the next event.`
         : `The die-hards stay late: you\u2019ll dance with 4 ${s.role === 'Lead' ? 'follows' : 'leads'}, and the die-hards often make the final. Connection, musicality, timing, community +6.`,
-      0, fri ? WK.arrival.energy : WK.social.energy);
+      0, Math.round((fri ? WK.arrival.energy : WK.social.energy) * (has(s, 'owl') ? .6 : 1)));
     // Pranks happen by day, while everyone's at the workshops (Steve, v55): nights are for the social or sleep.
     if (!sl.night && wk.shared && !wk.pranked) opt('prank', 'Prank another room', 'While everyone\u2019s at the workshops, team up with your roommates and another room from your community. A lot of laughing: motivation up, community +3. One per weekend, and they might get you back.', 0, WK.prank.energy);
     if (!sl.night) {
@@ -1918,6 +2082,9 @@ const Engine = (() => {
     const naps = sl.night ? 0 : napsBefore(wk, i), restGain = Math.round((wk.single ? 20 : -WK.rest.energy) * NAP[Math.min(NAP.length - 1, naps)]);
     if (sl.night) opt('rest', 'Go to bed', `Skip the social and sleep properly. +${restGain} energy.`, 0, -restGain);
     else opt('rest', 'Rest at the hotel', naps ? `You've already rested ${naps === 1 ? 'once' : naps + ' times'} this weekend. Another nap only gives +${restGain} energy.` : `Nap, stretch, eat something real. +${restGain} energy.`, 0, -restGain);
+    const TN = { social: [['owl', 'costs less energy'], ['butterfly', 'lifts you more'], ['brain', 'lifts you less']], workshop: [['junkie', 'teaches you more']], star: [['junkie', 'teaches you more']],
+      private: [['perfect', 'lands more'], ['butterfly', 'lands a little less']], offer: [['perfect', 'lands more'], ['butterfly', 'lands a little less']], prank: [['prankster', 'lifts you more']] };
+    o.forEach(x => (TN[x.id] || []).forEach(([id, t]) => { if (has(s, id)) x.desc += ` ${TRAITS[id].name}: ${t}.`; })); // your traits at work (v58)
     return o;
   }
 
@@ -1937,7 +2104,7 @@ const Engine = (() => {
     else if (optId === 'social') {
       // Event socials beat home socials: the die-hards who stay late are strong dancers from everywhere.
       add('conn', rand(2, 3.5), 'eventSocial'); add('mus', rand(2, 4), 'eventSocial'); add('time', rand(1, 2), 'eventSocial'); sc = 6;
-      moodShift(s, MOOD.evSocial, 'the late-night social', wk.moods = wk.moods || []);
+      moodShift(s, socialLift(s, MOOD.evSocial), 'the late-night social' + tw(s, 'butterfly', 'brain'), wk.moods = wk.moods || []);
       const res = wk.res, fin = new Set((res.partners || []).map(p => p.id));
       const rest = (res.others || []).filter(p => !fin.has(p.id));
       // The die-hards are strong dancers, so three are finalists; one isn't, so it's not a giveaway.
@@ -1953,20 +2120,22 @@ const Engine = (() => {
     else if (optId === 'watch') { add(rnd() < .5 ? 'mus' : 'comp', 1, true); note = 'The All-Star final was unreal.'; }
     else if (optId === 'prank') {
       wk.pranked = true; sc = 3;
-      const season = s.season || 1, pr = pick(PRANKS.filter(p => p.id !== 'ducks' || !(s.tyrone && s.tyrone.season === season))); // one Tyrone a season
+      const season = s.season || 1, pr = nextPrank(s, season);
       note = pr.text;
       let rival = null, by = null; const rd = (wk.here || []).map(id => s.field.find(d => d.id === id)).filter(Boolean)[0];
       if (rd && rnd() < .5) {
         const R = s.rivalry[rd.id], L = PRANK_RIVAL[R.tone === 'friendly' ? 'friendly' : 'rival'], kinds = Object.keys(L).filter(k => !(k === 'room' && wk.res.roomie === rd.name));
-        const k = pick(kinds); rival = { tag: labelOf(R), tone: R.tone, text: fill(L[k], { n: R.name }) }; if (k === 'room') by = R.name;
+        const k = R.tone === 'friendly' && kinds.includes('room') && rnd() < .67 ? 'inOn' : pick(kinds); // friends mostly join in
+        rival = { tag: labelOf(R), tone: R.tone, text: fill(Array.isArray(L[k]) ? pick(L[k]) : L[k], { n: R.name }), with: k === 'inOn' || k === 'helped' }; if (k === 'room') by = R.name;
       }
       wk.prank = { id: pr.id, short: pr.short, react: pick(pr.react), rival };
       s.payback = { at: absWeek(s), ev: wk.res.ev.name, by };
       if (pr.id === 'ducks') { // the note comes under your door the morning after that night
-        s.tyrone = { season, ev: wk.res.ev.name, sightings: 0 };
+        s.tyrone = { v: 2, season, at: absWeek(s), ev: wk.res.ev.name, sightings: 0, homeAt: null };
         const n = wk.slots.findIndex((x, k) => k > wk.cur && x.night); wk.tyroneNote = n < 0 ? wk.slots.length : n + 1;
       }
-      moodShift(s, MOOD.prank, 'the prank', wk.moods = wk.moods || []);
+      moodShift(s, has(s, 'prankster') ? 8 : MOOD.prank, 'the prank' + tw(s, 'prankster'), wk.moods = wk.moods || []);
+      if (rival && rival.with) moodShift(s, 1, `pranking with ${rd.name}`, wk.moods); // better with a partner in crime
     }
     else if (optId === 'rest') { note = sl.night ? 'Early night. You slept properly.' : napsBefore(wk, wk.cur) ? 'More lying around. It helps a little.' : 'A real nap. Your legs thank you.'; }
     if (sl.snore) { s.energy = Math.max(0, s.energy - 10); note += ' Then the snoring started. −10 energy.'; o.energy += 10; }
@@ -2004,7 +2173,7 @@ const Engine = (() => {
     if (sl.round === 'Prelims') {
       const prelimW = PRELIM_W;
       heatPartners(s, res, 'Prelims', res.others || []);
-      const kb = heatBonus(s, res, 'Prelims');
+      const kb = heatBonus(s, res, 'Prelims') + (has(s, 'floorcraft') ? 1.5 : 0); res.calm = has(s, 'floorcraft');
       const nerves = !s.heatDone; s.heatDone = true;
       const nervePen = nerves ? 4 * (1 - s.stats.comp / 100) : 0;
       res.nerves = Math.round(nervePen * 10) / 10;
@@ -2017,7 +2186,7 @@ const Engine = (() => {
       const pool = res.pool.map(c => c.isPlayer ? me : c);
       const semiIds = new Set(res.otherSemi || []);
       heatPartners(s, res, 'Semifinal', (res.others || []).filter(p => semiIds.has(p.id)));
-      const kb = heatBonus(s, res, 'Semifinal');
+      const kb = heatBonus(s, res, 'Semifinal') + (has(s, 'floorcraft') ? 1.5 : 0);
       const songs = songSet();
       const sw = so => { const x = {}; STATS.forEach(k => x[k] = songW(so)[k] * .75 + (k === 'time' ? .25 : 0)); return x; };
       const w = {}; STATS.forEach(k => w[k] = songs.reduce((a, so) => a + sw(so)[k], 0) / songs.length);
@@ -2038,7 +2207,7 @@ const Engine = (() => {
     } else {
       runFinal(s, res, me, ef); info = { final: true };
     }
-    s.energy = Math.max(0, s.energy - ROUND_ENERGY[sl.round]);
+    s.energy = Math.max(0, s.energy - roundEnergy(s, sl));
     if (wk.crash) { s.energy = Math.max(0, s.energy - 20); wk.crash = false; wk.crashed = true; }
     sl.done = true; sl.result = { round: sl.round, info, place: res.place, points: res.points };
     wk.cur++; springPrank(s);
@@ -2057,7 +2226,7 @@ const Engine = (() => {
     });
     const ranksByJudge = JUDGES.map(j => {
       const sc = couples.map((c, i) => ({ i, v: c.perf + .12 * (c.stats[j.focus] - fm[j.focus]) + gauss() * J.noise
-        + c.moments.reduce((a, ok) => a + (rnd() < J.see ? (ok ? J.hit : -J.hit) : 0), 0) }));
+        + c.moments.reduce((a, ok, k) => a + (rnd() < J.see ? (ok ? J.hit : -J.hit * (c.mw ? c.mw[k] : 1)) : 0), 0) }));
       sc.sort((x, y) => y.v - x.v); const r = []; sc.forEach((x, k) => r[x.i] = k + 1); return r;
     });
     const ranks = couples.map((_, i) => JUDGES.map((_, j) => ranksByJudge[j][i]));
@@ -2074,11 +2243,10 @@ const Engine = (() => {
     const w = {}; STATS.forEach(k => w[k] = songs.reduce((a, so) => a + gw(so)[k], 0) / songs.length);
     const song = songs[0];
     const partners = shuffle([...(res.partners || Array.from({ length: 8 }, () => makeNPC(60)))]);
-    const legacyMet = new Set(res.met || []); // saves from v18 kept met bibs per event
-    const familiar = b => b.priya ? Math.min(FAMILIAR_CAP, FAMILIAR * (1 + (s.chem || 0))) : Math.min(FAMILIAR_CAP, FAMILIAR * metWhere(s, b).length + (legacyMet.has(b.bib) ? 6 : 0));
+    const familiar = b => b.priya ? Math.min(FAMILIAR_CAP, FAMILIAR * (1 + (s.chem || 0))) : Math.min(FAMILIAR_CAP, familiarStep(s) * metWhere(s, b).length);
     const couples = pool.map((a, i) => {
       const b = partners[i]; const st = coupleStats(a, b);
-      if (a.isPlayer) st.conn = Math.min(STAT_MAX, st.conn + familiar(b)); // you've danced together before
+      if (a.isPlayer) { st.conn = Math.min(STAT_MAX, st.conn + familiar(b) - (has(s, 'specialist') && !familiar(b) ? 3 : 0)); traitCouple(s, a, b, st, spot); } // you've danced together before
       return { a, b, isPlayer: !!a.isPlayer, stats: st, base: weighted(st, w) };
     });
     const fm = {}; STATS.forEach(k => fm[k] = couples.reduce((acc, c) => acc + c.stats[k], 0) / couples.length);
@@ -2087,9 +2255,11 @@ const Engine = (() => {
     for (let i = 0; i < 6; i++) {
       const si = spot ? 0 : Math.floor(i / 2); // two moments per song
       const st = i === 5 ? 'comp' : weightedPick(gw(songs[si])); const mine = pc.stats[st] * (st === 'comp' ? 1 : ef);
-      const ok = rnd() < sigmoid((mine - fm[st]) / 5);
-      moments.push({ stat: st, ok, text: pick(PHRASES[st][ok ? 'good' : 'bad']), song: si });
+      const ok = rnd() < sigmoid((mine - fm[st] + traitEdge(s, st, pc.b)) / 5);
+      const tr = momentTrait(s, st, ok, pc.b);
+      moments.push({ stat: st, ok, text: pick(PHRASES[st][ok ? 'good' : 'bad']), song: si, ...(tr ? { trait: tr } : {}) });
     }
+    pc.mw = moments.map(m => m.ok ? 1 : traitMiss(s, m.stat));
     moments.filter(m => !m.ok).forEach(m => res.fails.push(m.stat));
     const mine = {}; STATS.forEach(k => mine[k] = pc.stats[k] * (k === 'comp' ? 1 : ef));
     res.fit = songs.map(so => songFit(gw(so), mine, fm));
@@ -2137,7 +2307,7 @@ const Engine = (() => {
     const r = wk.strictly && wk.strictly.result;
     if (r && r.pending) {
       r.pending = false; s.money += r.prize; s.winnings = (s.winnings || 0) + r.prize;
-      if (r.place === 1) { const m = []; moodShift(s, MOOD.win, 'winning the Strictly', m); r.moods.push(...m); (wk.moods = wk.moods || []).push(...m); }
+      if (r.place === 1) { const m = []; moodShift(s, has(s, 'comeback') ? MOOD.win / 2 : MOOD.win, 'winning the Strictly' + tw(s, 'comeback'), m); r.moods.push(...m); (wk.moods = wk.moods || []).push(...m); }
     }
   }
 
@@ -2189,6 +2359,7 @@ const Engine = (() => {
   function exitOf(res) { return res.madeFinal ? null : res.rounds[res.rounds.length - 1]; }
   function finishEvent(s) {
     const wk = s.wk; if (wk.finished) return wk.summary;
+    const lockedBefore = Object.keys(STORE).filter(id => STORE[id].unlock && !STORE[id].unlock(s)); // for the "Unlocked" card (v58)
     awards(s); wk.finished = true;
     const res = wk.res;
     s.sc = Math.min(100, s.sc + SC.event);
@@ -2199,9 +2370,9 @@ const Engine = (() => {
     s.winRun = res.madeFinal && res.place === 1 ? (s.winRun || 0) + 1 : 0;
     if (s.winRun >= 2) { s.complacent = { until: absWeek(s) + MOOD.smugWeeks }; em.push({ n: 0, why: 'two wins in a row: you\u2019re getting complacent' }); }
     else if (!s.winRun) s.complacent = null; // anything but a win snaps you out of it
-    if (res.madeFinal && res.place === 1) moodShift(s, MOOD.win, 'the win', em);
-    else if (!res.madeFinal && ex && ex.next === 'Final' && ex.rank <= (ex.cut || 8) + 2) moodShift(s, MOOD.nearMiss, 'so close to the final', em);
-    else if (res.expect && got && got - res.expect >= Math.max(4, Math.round(n / 5))) moodShift(s, -MOOD.flop, 'a result well below how you felt', em);
+    if (res.madeFinal && res.place === 1) moodShift(s, has(s, 'comeback') ? MOOD.win / 2 : MOOD.win, 'the win' + tw(s, 'comeback'), em);
+    else if (!res.madeFinal && ex && ex.next === 'Final' && ex.rank <= (ex.cut || 8) + 2) moodShift(s, MOOD.nearMiss * (has(s, 'comeback') ? 2 : 1), 'so close to the final' + tw(s, 'comeback'), em);
+    else if (res.expect && got && got - res.expect >= Math.max(4, Math.round(n / 5))) moodShift(s, -Math.round(MOOD.flop * (has(s, 'perfect') ? 1.6 : 1)), 'a result well below how you felt' + tw(s, 'perfect'), em);
     else if (res.expect && got && (res.madeFinal || got <= res.expect + 2)) moodShift(s, MOOD.asHoped, res.madeFinal ? 'making the final' : 'dancing as well as you hoped', em);
     const beat = res.h2h.find(m => m.won), lost = res.h2h.find(m => !m.won && s.rivalry[m.id] && s.rivalry[m.id].tone === 'rival'); // one each way
     if (beat) moodShift(s, MOOD.h2hWin, `beating ${beat.name}`, em); else if (lost) moodShift(s, -MOOD.h2hLoss, `losing to ${lost.name}`, em);
@@ -2213,6 +2384,7 @@ const Engine = (() => {
     checkDoors(s);
     if (res.priyaHere) res.priya = priyaHere(s, res);
     if (res.priya) applyPriya(s, res.priya, res.ev);
+    wk.unlocked = lockedBefore.filter(id => STORE[id].unlock(s) && !s.gear[id]);
     if (s.week >= WEEKS) endSeason(s);
     const d = {}; STATS.forEach(k => { const g = s.stats[k] - wk.start.stats[k]; if (g) d[k] = g; });
     wk.summary = { d, moods: wk.moods || [], sc: Math.round(s.sc - wk.start.sc), energyStart: wk.start.energy, energyEnd: s.energy, spent: wk.start.money - s.money + (res.prize || 0) + (wk.strictly && wk.strictly.result ? wk.strictly.result.prize || 0 : 0) };
@@ -2244,6 +2416,7 @@ const Engine = (() => {
     if (!s.devUnlocked) { s.devUnlocked = true; s.devNewsWeek = s.week; s.pals = s.pals || {}; s.pals.dev = { at: absWeek(s) }; } // Dev practises with Intermediates and up
     activeRivals(s).forEach(x => { if (x.div === s.moved.from) milestone(s, s.rivalry[x.id], 'youUp'); });
     promoCandidates(s);
+    offerTraits(s, 'sig'); // your signature, picked on the promotion screen
     s.log.unshift({ season: s.season, week: s.week, text: (forced ? `${d.must} points: you had to move up to ` : 'Moved up to ') + d.next });
   }
   // After each event: 16 Novice points lets you move up (you choose when), 30 makes you; 45 Intermediate
@@ -2262,7 +2435,7 @@ const Engine = (() => {
     endWeek(s, true);
     s.season = (s.season || 1) + 1; s.week = 1; s.seasonDone = false; s.mood = Math.max(moodOf(s), MOOD.season); s.moodRun = 0; s.routine = null; s.complacent = null; s.winRun = 0; // a new season feels fresh
     s.evt = null; s.seenEvents = []; s.hadBirthday = false; s.semis = {}; s.attend = {}; s.focus = null; s.carpool = false; s.devNewsWeek = 0; s.lateNews = null;
-    s.cal = makeCalendar((s.cal || []).filter(c => c.going && !c.late).map(c => c.id)); // last season's picks, ready to change
+    s.cal = makeCalendar((s.cal || []).filter(c => c.going).map(c => c.id)); // last season's picks, ready to change
     s.log.unshift({ season: s.season, week: 1, text: `Season ${s.season} begins (${s.div || 'Novice'})` });
   }
   function reviewOptions(s, res) {
@@ -2279,7 +2452,7 @@ const Engine = (() => {
     if (res.reviewed || s.money < cost || cost > spare(s)) return null;
     s.money -= cost; res.reviewed = kind;
     const deltas = {};
-    const up = (k, g) => gain(s, k, g, true, deltas);
+    const up = (k, g) => gain(s, k, g * (has(s, 'student') ? 1.5 : 1), true, deltas);
     const weakest = () => STATS.map(k => ({ k, d: s.stats[k] - (res.fieldAvg[k] || 0) })).sort((a, b) => a.d - b.d)[0].k;
     let leak;
     const budget = reviewBudget(s, res, kind);
@@ -2303,7 +2476,7 @@ const Engine = (() => {
     return { kind, deltas, leak, read, note: kind === 'coach' ? LEAKS[leak] : null };
   }
 
-  return { R, STATS, awards, awardsDue, STRICTLY, strictlyPartners, strictlyOpen, enterStrictly, isOpen, LABEL, WEEKS, PROMO, INCOME, RECOVER, EVENTS, POINTS, GENRES, PRACTICE, named, knows, palOf, absWeek, MOOD, moodOf, moodWord, moodMult, planKey, planDiff, isSmug, VISIT, PRANKS, PRANKED, gainWord, LEVEL_WORDS, levelIn, readStat, feel, CLASS, SOCIAL, MOCK, PRIVATE_COST, PRIVATE_ENERGY, DISCOUNT, DEV_UNLOCK, SC, PRIVATE_COACH, JUDGES, SHORT, REVIEW,
+  return { R, STATS, TRAITS, nextPrank, tyHomeAt, TY_SIGHTINGS, roundEnergyWhy, finalTraits, has, styleOf, pickTrait, incomeOf, roundEnergy, awards, awardsDue, STRICTLY, strictlyPartners, strictlyOpen, enterStrictly, isOpen, LABEL, WEEKS, PROMO, INCOME, RECOVER, EVENTS, POINTS, GENRES, PRACTICE, named, knows, palOf, absWeek, MOOD, moodOf, moodWord, moodMult, planKey, planDiff, isSmug, VISIT, PRANKS, PRANKED, gainWord, LEVEL_WORDS, levelIn, readStat, feel, CLASS, SOCIAL, MOCK, PRIVATE_COST, PRIVATE_ENERGY, DISCOUNT, DEV_UNLOCK, SC, PRIVATE_COACH, JUDGES, SHORT, REVIEW,
     newGame, resume, answerEvent, eventOk, emptyPlan, mockAvailable, socialAvailable, privatePrice, devMult, planCost, scGainOf, checkPlan, sanitizePlan, applyWeek, endWeek,
     weeklySpare, DOOR, doorPass, STORE, STORE_WK, gearState, buyGear, standState, buyStand, startEvent, slotOptions, chooseSlot, danceRound, finishEvent, skipEvent, reviewOptions, reviewBudget, buyReview, rescueFrac, exitOf, ordinal, LV, teach, levelOf, teachFrac, gainRange, eventAt, calendarOf, setGoing, nextEvent, priceOf, tierOf, SUGGESTED, LATE_WEEK, makeCalendar, CAREER, DIVS, entry, canMoveUp, moveUp, newSeason, door, STAT_MAX, relativePlacement, energyFactor, ROUND_ENERGY, WK, FAMILIAR, FAMILIAR_CAP, rollClass, CALLBACK, rivalReport, hasSemi, mockFor, spotChance, JUDGING, PRE_JUDGE, bookBy, upfrontOf, doorOf, canChange, spare, heldFor, dues, shortfall, keepFor, POP, rivalsOf, PRIYA, growPop, popTemplate, agePop,
     RIVAL_MAX, RIVAL_TYPES, RIVALRY, labelOf, preLine, describeRival, activeRivals, trackRival, pickMain, stopRival, attends, gapWord, standing, mySkill, skillOf, promoCandidates };
@@ -2342,7 +2515,7 @@ function topbar() {
   return `
   <div class="top"><span class="brand">Anchor Point</span><span class="topr"><span class="eyebrow">Season ${seasonNo()} · Week <span class="num">${Math.min(S.week, E.WEEKS)}</span>/${E.WEEKS}</span><button class="helpbtn" data-help="1" aria-label="How it works and tips" title="How it works and tips">?</button></span></div>
   <div class="meters">
-    <div class="meter"><span class="lbl">Money</span><span class="money">$${S.money}${dl('money')}</span><span class="pay">+$${E.INCOME} pay each week</span></div>
+    <div class="meter"><span class="lbl">Money</span><span class="money">$${S.money}${dl('money')}</span><span class="pay">+$${E.incomeOf(S)} pay each week</span></div>
     <div class="meter"><span class="lbl"><span>Energy</span><span class="num">${S.energy}${dl('energy')}</span></span><div class="track"><div class="fill energy ${low ? 'low' : ''}" style="width:${S.energy}%"></div></div></div>
     <div class="meter"><span class="lbl"><span>${divNow()}</span><span class="num">${S.points}/${target()}</span></span><div class="track"><div class="fill points" style="width:${Math.min(100, S.points / target() * 100)}%"></div></div></div>
     <button class="meter mood" data-help="1" title="${moodTip()} Tap for how it works." aria-label="Motivation: ${E.isSmug(S) ? 'Complacent' : E.moodWord(S)}. Tap for how it works."><span class="lbl"><span>Motivation</span><span${E.isSmug(S) ? ' class="smug"' : ''}>${E.isSmug(S) ? 'Complacent' : E.moodWord(S)}</span></span><div class="track"><div class="fill mood ${E.isSmug(S) ? 'smug' : E.moodOf(S) < 55 ? 'low' : ''}" style="width:${(E.moodOf(S) - E.MOOD.min) / (E.MOOD.max - E.MOOD.min) * 100}%"></div></div></button>
@@ -2389,7 +2562,7 @@ const prizeText = ev => ev.prize.map((p, i) => E.ordinal(i + 1) + (p === 'pass' 
 function nextEventCard() {
   const nx = E.nextEvent(S), wait = nx ? nx.week - S.week : 0;
   if (!nx) return `<section class="block"><p class="eyebrow">Next event</p><h2>No more events this season</h2>${pointsLine()}</section>`;
-  const price = E.priceOf(S, nx), have = S.money + E.INCOME * wait, ok = have >= price;
+  const price = E.priceOf(S, nx), have = S.money + E.incomeOf(S) * wait, ok = have >= price;
   const money = nx.booked ? `Booked${nx.paid ? ` ($${nx.paid} paid)` : ''}. <b class="cash">$${price}</b> still to pay at the event, and the game keeps it back for you.`
     : `Book by the end of week ${E.bookBy(nx)}: <b class="cash">$${E.upfrontOf(nx, (S.passes || 0) > 0)}</b> then, <b class="cash">$${E.doorOf(nx)}</b> at the event. You'll have <b class="cash ${ok ? 'ok' : 'short'}">$${have}</b> by then ${ok ? '✓' : '✗'} <span class="muted">(if you spend nothing)</span>`;
   return `<section class="block">
@@ -2422,7 +2595,7 @@ function seasonList() {
       : ev.week > S.week ? `<button class="choice" data-cal="${ev.id}" data-on="${ev.going ? 0 : 1}" aria-pressed="${ev.going}">${ev.going ? 'Going' : 'Not going'}</button>` : '<span class="chip">Missed</span>';
     const when = h ? '' : ev.doorPass ? `Door pass: $${ev.doorPrice}, all at the event` : ev.locked ? (ev.going ? `Booked: $${ev.paid} paid, $${E.doorOf(ev)} at the event` : ev.doorOk ? `Booking closed. A door pass costs $${ev.doorPrice}, all at the event (more than booking ahead)` : '') : `Book by the end of week ${E.bookBy(ev)}: $${E.upfrontOf(ev, false)} then, $${E.doorOf(ev)} at the event`;
     const more = `Pass $${ev.pass}, travel $${ev.trip}${ev.hotel ? `, hotel $${ev.hotel}` : ''}. Prizes: ${prizeText(ev)}.${ev.rare ? ' The visiting pro runs a high-level workshop.' : ''}`;
-    return `<li class="evrow ${ev.going || h ? '' : 'off'}"><span class="t">Wk ${ev.week} · ${esc(ev.name)}${ev.late ? ' <span class="chip acc">New</span>' : ''}</span>${ctl}
+    return `<li class="evrow ${ev.going || h ? '' : 'off'}"><span class="t">Wk ${ev.week} · ${esc(ev.name)}</span>${ctl}
       <span class="s">Tier ${ev.tier} · ${ev.field} ${divNow()} ${role} · ${TRAVEL[ev.travel]} · <b class="num">$${ev.cost}</b> · a win is ${pts} pts</span>
       <details class="more s" data-sec="ev-${ev.id}"${V.open && V.open['ev-' + ev.id] ? ' open' : ''}><summary>${when || 'Cost and prizes'}</summary><p>${more}</p></details></li>`;
   }).join('');
@@ -2431,7 +2604,7 @@ function seasonList() {
   return `<ul class="evlist">${rows}</ul>
     <div class="totals">
       <div><span class="lbl">Still to come</span><b class="num">${ahead.length} event${ahead.length === 1 ? '' : 's'}</b><span class="muted">on your picks</span></div>
-      <div><span class="lbl">Still to pay</span><b class="num">$${cost}</b><span class="muted">${S.passes ? `you have ${S.passes} free pass${S.passes > 1 ? 'es' : ''}` : `you earn $${E.INCOME} a week`}</span></div>
+      <div><span class="lbl">Still to pay</span><b class="num">$${cost}</b><span class="muted">${S.passes ? `you have ${S.passes} free pass${S.passes > 1 ? 'es' : ''}` : `you earn $${E.incomeOf(S)} a week`}</span></div>
       <div><span class="lbl">Points</span><b class="num" style="color:${max >= need ? 'var(--good)' : 'var(--warn)'}">up to ${max}</b><span class="muted">${need ? `you need ${need} more` : 'if you won them all'}</span></div>
     </div>`;
 }
@@ -2540,7 +2713,10 @@ function teachLabel(f) {
   return f >= .7 ? '<b style="color:var(--good)">teaches you a lot</b>' : f >= .4 ? '<b style="color:var(--warn)">teaches you some</b>' : '<b style="color:var(--bad)">not much left to teach you</b>';
 }
 // One line under a planner slot, with the details a tap away (v56). Open/closed is kept like the fold-away sections.
-const hintLine = (sec, line, more) => more ? `<details class="more" data-sec="h-${sec}"${V.open && V.open['h-' + sec] ? ' open' : ''}><summary>${line}</summary><p>${more}</p></details>` : `<p class="hint">${line}</p>`;
+const PLAN_TN = { social: [['butterfly', 'lifts you more'], ['brain', 'lifts you less'], ['homebody', 'teaches more']], priv: [['perfect', 'lands more'], ['butterfly', 'lands a little less']] };
+const planTN = sec => (PLAN_TN[sec] || []).filter(([id]) => E.has(S, id)).map(([id, t]) => ` · ${E.TRAITS[id].name}: ${t}`).join('')
+  + (sec === 'prac' && V.plan && V.plan.prac === 'solo' && E.has(S, 'connector') ? ` · ${E.TRAITS.connector.name}: teaches less` : '');
+const hintLine = (sec, line0, more, line = line0 + planTN(sec)) => more ? `<details class="more" data-sec="h-${sec}"${V.open && V.open['h-' + sec] ? ' open' : ''}><summary>${line}</summary><p>${more}</p></details>` : `<p class="hint">${line}</p>`;
 const TRAINS_SHORT = { rest: 'Recovers 10 energy, trains nothing', solo: 'Timing', priya: 'Technique and Connection', lena: 'Everything', dev: 'Musicality and Timing' };
 function planner() {
   const p = V.plan; const chk = E.checkPlan(S, p); const c = chk.cost;
@@ -2577,7 +2753,7 @@ function planner() {
       ${E.mockAvailable(S) ? `<div class="choices" style="margin-top:6px"><span class="mini">Mock J&amp;J night</span>${choice('mock', 0, 'Skip', !p.mock, !p.social)}${choice('mock', 1, 'Add', p.mock, !p.social, `$${E.MOCK.cost} · −${E.MOCK.energy}`)}</div>` : ''}
       ${hintLine('social', `Connection and Musicality · ${teachWord('social')} · +${E.SC.social} community`, `Connection, Musicality from song variety, a little Timing and Composure. Community +${E.SC.social} every time. ${E.knows(S, 'lena') ? N('Makes {lena} more likely to ask you to practice next week,') : 'Makes it more likely someone asks you to practice,'} and a pro might notice you.${E.mockAvailable(S) ? ' Mock J&amp;J: mostly composure, +' + E.SC.mock + ' community.' : ''}`)}</div></div>`}
     <div class="preview">
-      <div><span class="lbl">Cost</span><b class="num ${c.money > S.money ? 'over' : ''}">$${c.money}</b><span class="muted">$${Math.max(0, moneyLeft)} left, then +$${E.INCOME} pay</span></div>
+      <div><span class="lbl">Cost</span><b class="num ${c.money > S.money ? 'over' : ''}">$${c.money}</b><span class="muted">$${Math.max(0, moneyLeft)} left, then +$${E.incomeOf(S)} pay</span></div>
       <div><span class="lbl">Energy</span><b class="num ${endE < 0 ? 'over' : ''}">${S.energy} → ${endE}</b><span class="muted">${ev ? 'you arrive with this' : `+${E.RECOVER} over the weekend`}</span></div>
       <div><span class="lbl">Community</span><b class="num">${signed(scg - E.SC.decay)}</b><span class="muted">net of weekly fade</span></div>
     </div>
@@ -2642,6 +2818,7 @@ function helpRules() {
       <li><b>Motivation</b> is your mind over the season. The same week again and again wears it down; socials, new people, good results and pranks lift it. Fired up, training lands better; burnt out, worse. Two wins in a row and you get complacent.</li>
       <li><b>Events:</b> pick them on the Season tab. Going means booked: at the deadline you pay the pass (and flight), with no refunds, and the rest at the event. Only finalists earn points, and bigger events pay more.</li>
       <li><b>Finals</b> are a random partner and random songs. You don't pick the moves: the + and − moments show whether your training holds up. Anyone you dance with at a social or in a heat could be your partner in a final, and it helps to know them. Placings (and points and prizes) are read out at the awards ceremony on Sunday evening.</li>
+      <li><b>Traits:</b> you pick a habit when you start and a signature move when you move up to Intermediate. Each has an upside and a catch; they're on your dancer card, and options say when one is at work.</li>
       <li><b>Strictly:</b> at bigger events (not Tier 1) there's a Strictly on Sunday, where you choose your partner: ${N('{priya}')} once your chemistry is full, or someone you've danced with enough that they're open to it (you'll hear when they are). You pay half the entry and split the prize. No WSDC points.</li>
       <li><b>Rivals:</b> your main rival starts a step ahead of you. At every event you both dance, whoever gets further wins the head-to-head. Others suggest themselves (up to ${E.RIVAL_MAX} at a time), and they follow you up the divisions.</li>
       <li><b>The circuit is alive.</b> Everyone improves, the best move up, and newcomers join. Early on a Novice final is a lucky break. Moving up a division puts you back near the bottom.</li>
@@ -2714,7 +2891,7 @@ function h2hLine(m) {
 // The weekend wrap-up: how you did against each rival here, and your rivals elsewhere.
 function rivalWrap(r) {
   const sug = suggestCard();
-  if (!r.h2h) return r.rivals.some(x => x.rival) ? `<p style="font-size:.86rem"><b>Your rivals:</b> ${E.rivalReport(r).map(x => `${esc(x.name)}, ${x.text}`).join(' · ')}</p>` : ''; // weekends from before v37
+  if (!r.h2h) return '';
   if (!r.h2h.length && !(r.away || []).length && !(r.rivalMiles || []).length && !sug) return '';
   return `<section class="block"><h2>Your rivals</h2><ul class="notes">
     ${r.h2h.map(m => { const R = S.rivalry[m.id], miles = m.miles || (m.notes || []).map(text => ({ text })); return `<li class="${m.won ? 'good' : 'bad'}"><span>${h2hLine(m)}${R ? ` <span class="muted tiny">Head-to-head ${R.w}–${R.l}.</span>` : ''}${miles.map(x => `<br><span class="chip ${x.bad ? 'bad' : 'good'}" style="margin-top:6px">Milestone</span> ${esc(x.text)}`).join('')}</span></li>`; }).join('')}
@@ -2862,7 +3039,9 @@ function songCard(so, head, fit, couple, delay, felt) {
     <p><b>${esc(so.title)}</b> <span class="muted">${esc(so.artist)} · ${so.genre} · <span class="num">${so.bpm}</span> bpm</span></p>${line}</div>`;
 }
 const songHead = (r, i) => r.spotlight ? 'Spotlight · one song' : `Song ${i + 1} of ${r.songs.length}`;
-const momentLi = (m, delay) => `<li${delay !== undefined ? ` style="animation-delay:${delay}s"` : ''}><span class="mk ${m.ok ? 'good' : 'bad'}">${m.ok ? '+' : '−'}</span><span>${esc(m.text)}</span><span class="tag">${E.LABEL[m.stat]}</span></li>`;
+// Your traits at work in this final (v58): a gold callout, trait name first, so it doesn't get lost on the card.
+const traitBox = ft => ft.length ? `<div class="ftraits"><div class="ul">Your traits</div>${ft.map(t => { const i = t.indexOf(': '); return `<p><b>${esc(t.slice(0, i))}</b> ${esc(t.slice(i + 2))}</p>`; }).join('')}</div>` : '';
+const momentLi = (m, delay) => `<li${delay !== undefined ? ` style="animation-delay:${delay}s"` : ''}><span class="mk ${m.ok ? 'good' : 'bad'}">${m.ok ? '+' : '−'}</span><span>${esc(m.text)}</span><span class="tag">${E.LABEL[m.stat]}${m.trait ? ` · ${esc(m.trait)}` : ''}</span></li>`;
 // After the final: each song with its fit and moments, then your couple against the final on every stat.
 // `felt` (v57, Steve): right after the final you only know what you felt on the floor, so no "vs the final" until
 // the scoresheets are up after the awards.
@@ -2874,7 +3053,7 @@ function setRecap(r, felt) {
     const f = r.fit[i], [c, w] = fitWord(f.edge);
     return `<li><p><b>${r.songs.length > 1 ? (i + 1) + '. ' : ''}${esc(so.title)}</b> <span class="muted">· ${so.genre}</span></p>
       <p class="tiny">Rewards ${E.LABEL[f.top[0]]} and ${E.LABEL[f.top[1]]}${felt ? '' : ` · <span class="fit ${c}">${w}</span>`}</p>
-      <div class="chips" style="margin-top:4px">${r.moments.filter(m => m.song === i).map(m => `<span class="chip ${m.ok ? 'good' : 'bad'}">${m.ok ? '+' : '−'} ${E.LABEL[m.stat]}</span>`).join('')}</div></li>`;
+      <div class="chips" style="margin-top:4px">${r.moments.filter(m => m.song === i).map(m => `<span class="chip ${m.ok ? 'good' : 'bad'}">${m.ok ? '+' : '−'} ${E.LABEL[m.stat]}${m.trait ? ' · ' + esc(m.trait) : ''}</span>`).join('')}</div></li>`;
   }).join('');
   const rows = order.map(k => `<div class="vs"><span>${E.LABEL[k]} <span class="muted num">${Math.round(r.weights[k] * 100)}%</span></span>
     <div class="bar"><i class="${d(k) >= 0 ? 'up' : 'down'}" style="width:${Math.min(50, Math.abs(d(k)) / 12 * 50)}%"></i></div>
@@ -2911,7 +3090,7 @@ function reviewBlock() {
     const rv = V.review;
     return `<section class="block"><p class="eyebrow">Video review</p>
       <h2>${rv.kind === 'coach' ? 'Your coach watched the footage' : 'You watched your own footage'}</h2>
-      <div class="chips">${Object.entries(rv.deltas).map(([k, v]) => gainChip(k, v)).join('')}</div>
+      <div class="chips">${Object.entries(rv.deltas).map(([k, v]) => gainChip(k, v)).join('')}</div>${E.has(S, 'student') ? `<p class="muted tiny">Student of the game: it lands a lot more.</p>` : ''}
       ${rv.read ? `<p>${rv.read.map(esc).join('<br>')}</p>${readHint()}` : ''}
       ${rv.note ? `<p>${esc(rv.note)}</p><p class="muted tiny">Focus on ${E.LABEL[rv.leak].toLowerCase()} for the next 2 weeks: gains in it are 50% bigger.</p>` : ''}</section>`;
   }
@@ -2983,7 +3162,7 @@ function rivalsTab() {
 function hubTab(tab) {
   if (tab === 'me') { S.readsNew = Object.entries(S.reads || {}).filter(([, r]) => !(S.meSeen || '').split(',').includes(readKey(r))).map(([k]) => k); S.meSeen = meKey(); }
   const body = tab === 'season' ? seasonTab()
-    : tab === 'me' ? `${dancerCard()}${shop()}${people()}${diary()}`
+    : tab === 'me' ? `${dancerCard()}${traitIds().length ? `<section class="block"><h2>Your traits</h2>${traitIds().map(id => `<p style="margin-top:8px"><b>${esc(E.TRAITS[id].name)}</b>${traitBody(id)}</p>`).join('')}</section>` : ''}${shop()}${people()}${diary()}`
     : tab === 'rivals' ? rivalsTab()
     : `${moneyAlert()}${surpriseCard()}${focusCard()}${tipCard('week')}${introCards()}${newRivalCard()}${news()}${moveCard()}${comingUp()}${planner()}`;
   return `${topbar()}${body}${tabbar(tab)}`;
@@ -3016,20 +3195,27 @@ function prankedCard(wk) {
 }
 // Tyrone shows up when it happens in the weekend (v57): `show` is the slot index it lands at (old saves: straight away).
 function tyroneCard(wk) {
-  const t = wk.tyrone; if (!t || wk.cur < (t.show || 0)) return '';
-  return `<section class="tyrone"><div class="polaroid">${tyPic(t.id)}</div><div class="stack" style="gap:6px"><span class="sh"><span class="chip duck">Tyrone</span>${t.when ? ` <span class="tiny muted">${esc(t.when)}</span>` : ''}</span><p>${esc(t.text)}</p></div></section>`;
+  return (wk.tyrones || (wk.tyrone ? [wk.tyrone] : [])).filter(t => wk.cur >= (t.show || 0)).map(t => `<section class="tyrone"><div class="polaroid">${tyPic(t.id)}</div><div class="stack" style="gap:6px"><span class="sh"><span class="chip duck">Tyrone</span>${t.when ? ` <span class="tiny muted">${esc(t.when)}</span>` : ''}</span><p>${esc(t.text)}</p></div></section>`).join('');
 }
-const TY_NOTE = 'A note under your door: \u201cThe missing duck has a name. Tyrone is safe. For now.\u201d';
+const TY_NOTE = 'A note under your door: \u201cThe missing duck has a name. Tyrone. He\u2019s out there now. Keep your eyes open.\u201d';
 const tyroneNote = () => `<section class="tyrone"><div class="polaroid">${tyPic('reveal')}</div><div class="stack" style="gap:6px"><span class="chip duck">Tyrone</span><p>${TY_NOTE}</p></div></section>`;
 const tyroneNoteNow = wk => wk.prank && wk.prank.id === 'ducks' && wk.tyroneNote !== undefined && wk.cur >= wk.tyroneNote ? tyroneNote() : '';
 // The wrap-up: the prank of the weekend, getting pranked, and the night Tyrone got his name.
 // Strictly (v57): the card to enter, while there's still time before Sunday.
-const strictlyEnergy = st => E.ROUND_ENERGY.Final + (st.size > 8 ? E.ROUND_ENERGY.Prelims : 0);
+const strictlyEnergy = st => E.roundEnergy(S, { round: 'Final', t: st.t }) + (st.size > 8 ? E.ROUND_ENERGY.Prelims + E.roundEnergy(S, { round: 'Final', t: st.t }) - E.ROUND_ENERGY.Final : 0);
 const FIT_CHIP = { 'You click': 'good', 'Good fit': 'acc', 'Still learning each other': '' };
+// Traits (v58): a card to pick from, and the chips on your dancer card.
+const traitBody = id => { const t = E.TRAITS[id]; return `<span class="trait-up"><b>Upside:</b> ${esc(t.up)}</span><span class="trait-catch"><b>Catch:</b> ${esc(t.catch)}</span>`; };
+const traitPick = id => `<button class="opt" data-trait="${id}"><span class="t">${esc(E.TRAITS[id].name)}</span><span class="d">${traitBody(id)}</span></button>`;
+const traitIds = () => [S.traits && S.traits.innate, S.traits && S.traits.sig].filter(Boolean);
+const styleWord = p => ({ base: 'A solid base', chaos: 'A chaos muppet' })[E.styleOf(p)] || '';
 // Round names say which competition (v57, Steve): "J&J prelims", "J&J final", vs the Strictly.
 const jj = rd => rd === 'Strictly' ? 'Strictly' : 'J&amp;J ' + rd.toLowerCase();
 // A couple's names with the usual tags: you, rivals, your practice partner (v57: same everywhere).
-const coupleTags = (p, me) => `${esc(p.name)}${me && p.name === S.name ? '<span class="rtag you">you</span>' : ''}${p.rival ? '<span class="rtag">rival</span>' : ''}${p.priya ? '<span class="rtag friendly">practice partner</span>' : ''}`;
+const coupleTags = (p, me) => `${esc(p.name)}${divTag(p)}${me && p.name === S.name ? '<span class="rtag you">you</span>' : ''}${p.rival ? '<span class="rtag">rival</span>' : ''}${p.priya ? '<span class="rtag friendly">practice partner</span>' : ''}`;
+// In a combined Novice/Intermediate Strictly each dancer shows their division, except you (Steve, v58).
+const divTag = x => x.dv ? `<span class="rtag dv">${x.dv === 'Novice' ? 'Nov' : 'Int'}</span>` : '';
+const stLabel = st => st.combined ? 'Nov/Int' : esc(S.wk.res.ev.div);
 const coupleWho = row => `${coupleTags(row.lead, row.isPlayer)} &amp; ${coupleTags(row.follow, row.isPlayer)}`;
 function finalSheet(title, table, note) {
   const J = E.JUDGES;
@@ -3041,19 +3227,33 @@ function finalSheet(title, table, note) {
 // The Strictly final gets the same big moment as the J&J final (Steve, v57): a "no draw" card, then the dance floor.
 function stDanceEv() {
   const wk = S.wk, st = wk && wk.strictly, r = st && st.result; if (!r || !r.songs) return null;
-  return { strictly: true, ev: wk.res.ev, label: r.label, songs: r.songs, song: r.songs[0], moments: r.moments, fit: r.fit, spotlight: false, partner: { name: r.partner }, priya: r.priya, word: st.entered.word };
+  return { strictly: true, ev: wk.res.ev, label: r.label, songs: r.songs, song: r.songs[0], moments: r.moments, fit: r.fit, spotlight: false, partner: { name: r.partner, strong: st.entered.strong }, priya: r.priya, word: st.entered.word };
 }
 function strictlyCard() {
   const wk = S.wk, st = wk && wk.strictly;
   if (!st || !E.strictlyOpen(S) || V.strictlyNo === E.absWeek(S)) return '';
   const ps = E.strictlyPartners(S); if (!ps.length) return '';
   const half = st.fee / 2, can = E.spare(S) >= half, ev = wk.res.ev;
-  return `<section class="block"><div class="sec-head"><h2>Strictly · ${st.t}</h2><span class="chip acc">${st.combined ? 'Novice/Intermediate' : esc(ev.div) + ' and up'}</span></div>
+  return `<section class="block"><div class="sec-head"><h2>${stLabel(st)} Strictly · ${st.t}</h2><span class="chip acc">${st.combined ? 'Combined' : esc(ev.div) + ' and up'}</span></div>
+    ${st.combined ? `<p style="font-size:.9rem"><b>Novice and Intermediate couples dance this one together</b>, ${S.div === 'Novice' ? 'so some couples will be a level above you.' : 'so you\u2019ll be up against newer couples too.'}</p>` : ''}
     <p class="hint">Pick your partner and dance all three songs together. About ${st.size} couples${st.size > 8 ? ': prelim, then final' : ', straight to the final'}. No points. Your half: $${half} entry, prizes $${st.prize.map(x => x / 2).join(' / $')}. Uses your ${st.t} slot and ${strictlyEnergy(st)} energy.</p>
     <div class="stack" style="gap:8px">${ps.map(p => `<button class="opt" data-strictly="${p.id}" ${can ? '' : 'disabled'}>
       <span class="t">${esc(p.name)}</span><span class="c">$${half}</span>
       <span class="d"><span class="chip ${FIT_CHIP[p.word]}">${p.word}</span> ${p.priya ? 'Your practice partner.' : `You've danced together ${timesText(p.times)}.`}${!st.combined && p.div !== ev.div ? ` You'd dance the ${p.div} Strictly (${esc(p.name)}'s division).` : ''}${can ? '' : ` <b style="color:var(--bad)">Not enough spare money.</b>`}</span></button>`).join('')}</div>
     <button class="linkbtn quiet" data-strictlyno="1">Not this time</button></section>`;
+}
+// "Unlocked" (v58, Steve): what this weekend unlocked in the shop, with a chance to buy it now.
+const UNLOCK_WHY = { outfit: 'You made your first final, and finals deserve an outfit.' };
+function unlockCards(wk) {
+  return (wk.unlocked || []).map(id => {
+    const g = E.STORE[id], st = E.gearState(S, id), later = (V.unlockLater || {})[id];
+    if (st.owned) return `<section class="block unlock"><p class="ul">Unlocked</p><p><b>${esc(g.name)}: bought.</b> ${esc(g.desc)}</p></section>`;
+    if (later) return `<section class="block unlock"><p style="font-size:.9rem"><b>${esc(g.name)}</b> is waiting in the shop: <b>Me</b> tab → Shop.</p></section>`;
+    return `<section class="block unlock"><p class="ul">Unlocked</p><h2>${esc(g.name)}</h2>
+      <p>${UNLOCK_WHY[id] || ''}</p><p class="muted tiny">${esc(g.desc)} · $${g.price}</p>
+      <div class="choices" style="margin-top:8px"><button class="btn primary" data-buy="${id}" ${st.ok ? '' : 'disabled'}>Buy it · $${g.price}</button><button class="btn ghost" data-unlocklater="${id}">Maybe later</button></div>
+      ${st.ok ? '' : `<p class="muted tiny">${esc(st.why || '')}. It's waiting in the shop: <b>Me</b> tab → Shop.</p>`}</section>`;
+  }).join('');
 }
 function strictlySum(wk) {
   const r = wk.strictly && wk.strictly.result; if (!r) return '';
@@ -3068,11 +3268,14 @@ function prankRecap(wk) {
   const named = mine && mine.id === 'ducks' ? tyroneNote() : '';
   return `<section class="prank recap"><p>${lines.join(' ')}</p></section>${named}`;
 }
-// Season wrap-up: Tyrone comes home.
+// Season wrap-up: Tyrone comes home once you've seen him enough; until then he's still out there (v58).
 function tyroneHome(n) {
-  const t = S.tyrone; if (!t || t.season !== n) return '';
+  const t = S.tyrone; if (!t || t.season > n) return '';
+  if (!E.tyHomeAt(t)) return `<section class="tyrone"><div class="polaroid">${tyPic('reveal')}</div><div class="stack" style="gap:6px"><span class="chip duck">Tyrone</span>
+    <p>Tyrone is still out there. ${t.sightings ? `${t.sightings} sighting${t.sightings > 1 ? 's' : ''} so far.` : 'Nobody has seen him yet.'} He\u2019ll turn up.</p></div></section>`;
+  if (E.tyHomeAt(t) !== n) return '';
   return `<section class="block tyhome"><div class="polaroid big">${tyPic('home')}<span class="cap">Home. He’s seen things.</span></div>
-    <p>${t.sightings ? `Tyrone came home this season, after ${t.sightings} sighting${t.sightings > 1 ? 's' : ''}.` : 'Tyrone came home. He won’t say where he’s been.'}</p></section>`;
+    <p>${t.sightings ? `Tyrone came home, after ${t.sightings} sighting${t.sightings > 1 ? 's' : ''}.` : 'Tyrone came home. He won’t say where he’s been.'}</p></section>`;
 }
 /* ---------- screens ---------- */
 const screens = {
@@ -3107,6 +3310,12 @@ const screens = {
       </ul>
     </div>`;
   },
+  pickTrait() {
+    const o = S.traitOffer; if (!o || o.kind !== 'innate') return screens.pickRival();
+    return `<section class="block"><p class="eyebrow">New career</p><h1>Who are you as a dancer?</h1>
+      <p>Pick one habit. Each has an upside and a catch, and it stays with you all career. You'll pick a signature move when you move up to Intermediate.</p></section>
+    <div class="stack" style="gap:10px">${o.ids.map(traitPick).join('')}</div>`;
+  },
   pickRival() {
     const tone = V.tone || 'rival', c = (S.cands || []).map(rivalOf).filter(Boolean);
     return `<div class="start">
@@ -3126,7 +3335,6 @@ const screens = {
         <button class="btn wide" data-ownrival="1">Make them my rival</button></section>
     </div>`;
   },
-  rivals() { return hubTab('rivals'); }, // kept for old saves; the Rivals tab
   planSeason() {
     const n = seasonNo();
     return `${topbar()}
@@ -3154,6 +3362,9 @@ const screens = {
       <h1>Welcome to ${S.div}!</h1>
       <p>${m.forced ? `${pts} ${from} points: WSDC rules move you up.` : `You chose to move up with ${pts} ${from} points.`} Expect a much stronger field: you start near the back again.</p>
     </section>
+    ${S.traitOffer && S.traitOffer.kind === 'sig' ? `<section class="block"><h2>Your signature</h2><p class="muted tiny">Something you're known for now. Pick one: each has an upside and a catch, and it stays with you.</p>
+      <div class="stack" style="gap:10px;margin-top:8px">${S.traitOffer.ids.map(traitPick).join('')}</div></section>`
+      : S.traits && S.traits.sig ? `<section class="block"><h2>Your signature: ${esc(E.TRAITS[S.traits.sig].name)}</h2>${traitBody(S.traits.sig)}</section>` : ''}
     <section class="block"><h2>What's new in ${S.div}</h2>
       <ul class="notes">
         <li class="good"><span><b>${S.div} group classes at home.</b> Tuesday classes are now the ${S.div} class: harder material, so they teach you a lot again.</span></li>
@@ -3175,7 +3386,7 @@ const screens = {
       <p class="muted tiny">${S.div} ${S.role.toLowerCase()}s near your level. Track up to ${E.RIVAL_MAX} rivals at a time.${full ? ' You’re tracking ' + E.RIVAL_MAX + ' already: stop tracking someone on the rivals screen to make room.' : ''}</p>
       ${cands.map(d => `<div class="banner" style="margin-top:8px"><div><span><b>${esc(d.name)}</b>: ${esc(d.line)}</span>
         <div class="choices" style="margin-top:8px">${d.rival && V.editLabel === d.id ? describeNew(d.id) : d.rival ? `<span class="chip good">Tracking${S.rivalry[d.id] ? ': ' + esc(E.labelOf(S.rivalry[d.id])) : ''}</span>` : `<button class="choice" data-track="${d.id}" data-tone="rival" ${full ? 'disabled' : ''}>Bad blood</button><button class="choice" data-track="${d.id}" data-tone="friendly" ${full ? 'disabled' : ''}>Friendly</button>`}</div></div></div>`).join('')}</section>` : ''}
-    <button class="btn primary wide" data-promodone="1">On to ${S.div}</button>`;
+    <button class="btn primary wide" data-promodone="1" ${S.traitOffer && S.traitOffer.kind === 'sig' ? 'disabled' : ''}>${S.traitOffer && S.traitOffer.kind === 'sig' ? 'Pick your signature first' : 'On to ' + S.div}</button>`;
   },
   hub() { return hubTab(V.tab || 'week'); },
   weekDone() {
@@ -3227,7 +3438,8 @@ const screens = {
     const r = V.ev; const rd = r.rounds[V.stage];
     const n = rd.bibs.length;
     const grid = `<div class="bibs" style="--n:${n}">${rd.bibs.map((b, i) => `<span class="${b === S.bib ? 'me' : ''}" style="--i:${i}">${b}</span>`).join('')}</div>`;
-    const nerve = V.stage === 0 && r.nerves ? `<p class="muted">First-heat nerves cost you about ${r.nerves} points in prelims.</p>` : '';
+    const nerve = (V.stage === 0 && r.nerves ? `<p class="muted">First-heat nerves${E.has(S, 'showoff') ? ' (Show-Off)' : ''} cost you about ${r.nerves} points in prelims.</p>` : '')
+      + (r.calm ? `<p class="muted">Floor-craft: you stayed calm in the crowd.</p>` : '');
     let verdict, btn;
     if (rd.advanced) {
       verdict = rd.pulledIn
@@ -3277,7 +3489,7 @@ const screens = {
         <p class="eyebrow">Your ${partnerRole()}</p>
         <div class="big">${esc(p.name)}</div>
         <p class="num muted">Bib #${p.bib}</p>
-        <p style="font-size:.84rem">Strongest at <b>${E.LABEL[p.strong]}</b></p>
+        <p style="font-size:.84rem">Strongest at <b>${E.LABEL[p.strong]}</b>${styleWord(p) ? ` · ${styleWord(p)}` : ''}</p>
         ${p.priya ? `<p class="chip good" style="align-self:flex-start">Your practice partner!</p>` : p.met ? `<p class="chip good" style="align-self:flex-start">You've danced together</p>` : ''}
         <p style="font-size:.78rem" class="muted">Weakest at ${E.LABEL[E.STATS.slice().sort((a, b) => p.stats[a] - p.stats[b])[0]]}</p>
       </div></div></div>
@@ -3290,6 +3502,7 @@ const screens = {
     ${p.met ? `<p style="font-size:.86rem">${p.metWhere && p.metWhere.length ? `You've danced with ${esc(p.name)} ${timesText(p.metWhere.length)} this season (${p.metWhere.map(esc).join('; ')})` : `You and ${esc(p.name)} danced at a social this weekend`}, so you already know each other's lead and follow: <b>a Connection boost</b> as a couple.</p>` : ''}
     <p class="muted" style="font-size:.86rem">${n > 1 ? 'Each song asks for something different, and you only learn what when it starts.' : 'You only learn what the song asks for when it starts.'} You don't pick the moves; the floor shows whether the training was enough.</p>
     <p class="muted" style="font-size:.86rem">${r.rescue.gap > 0 ? `Partner rescue: you're ${r.rescue.gap >= 10 ? 'a lot' : r.rescue.gap >= 4 ? 'clearly' : 'a little'} stronger than ${esc(p.name)}. Your Composure lets you carry ${r.rescue.pct >= 38 ? 'nearly half' : r.rescue.pct >= 25 ? 'about a third' : r.rescue.pct >= 12 ? 'some' : 'a little'} of that gap.` : `${esc(p.name)} is as strong as you or stronger, so there's nothing to carry.`}</p>
+    ${traitBox(E.finalTraits(S, p, { spot: r.spotlight, known: p.met || p.priya }))}
     <button class="btn primary wide" data-dance="1">Take the floor</button>`;
   },
   dance() {
@@ -3312,6 +3525,7 @@ const screens = {
       <div class="flip"><div class="inner"><div class="drawcard">
         <p class="eyebrow">Your partner</p>
         <div class="big">${esc(r.partner.name)}</div>
+        ${styleWord(r.partner) ? `<p style="font-size:.84rem">${styleWord(r.partner)}</p>` : ''}
         <p class="chip ${FIT_CHIP[r.word] || ''}" style="align-self:flex-start">${r.priya ? 'Your practice partner!' : esc(r.word)}</p>
       </div></div></div>
       <div class="flip"><div class="inner"><div class="drawcard">
@@ -3321,6 +3535,7 @@ const screens = {
       </div></div></div>
     </div>
     <p class="muted" style="font-size:.86rem">Three songs, same partner, five judges. Placings at the awards ceremony.</p>
+    ${traitBox(E.finalTraits(S, { ...r.partner, stats: S.wk.strictly.entered.stats }, { strictly: true, known: true }))}
     <button class="btn primary wide" data-dance="1">Take the floor</button>`;
   },
   danced() {
@@ -3459,12 +3674,12 @@ const screens = {
       } else if (state === 'now' && E.awardsDue(S)) {
         body = `<span class="muted">After the awards.</span>`;
       } else if (state === 'now' && sl.round === 'Strictly') {
-        const st = wk.strictly, fin = st.size <= 8 || (st.result && st.result.prelim), E8 = E.ROUND_ENERGY;
-        body = `<b>Strictly ${fin ? 'final' : 'prelims'} with ${esc(st.entered.name)}</b><p class="muted tiny">${st.size <= 8 ? `${st.size} couples, straight to the final. ` : fin ? `You're through: 8 couples, five judges. ` : `${st.size} couples: the top 8 get called back for the final. `}Three songs together, the DJ picks them. Costs ${fin ? E8.Final : E8.Prelims} energy.${ef ? ` At ${S.energy} energy you're about ${ef}% below your best.` : ''}</p>
+        const st = wk.strictly, fin = st.size <= 8 || (st.result && st.result.prelim), fe = E.roundEnergy(S, sl), pe = E.ROUND_ENERGY.Prelims + fe - E.ROUND_ENERGY.Final;
+        body = `<b>${stLabel(st)} Strictly ${fin ? 'final' : 'prelims'} with ${esc(st.entered.name)}</b><p class="muted tiny">${st.size <= 8 ? `${st.size} couples, straight to the final. ` : fin ? `You're through: 8 couples, five judges. ` : `${st.size} couples: the top 8 get called back for the final. `}Three songs together, the DJ picks them. Costs ${fin ? fe : pe} energy.${ef ? ` At ${S.energy} energy you're about ${ef}% below your best.` : ''}</p>
           <button class="btn primary wide" data-round="1">Dance the Strictly ${fin ? 'final' : 'prelims'}</button>`;
       } else if (state === 'now' && sl.round) {
         const rd = sl.round; const cut = rd === 'Prelims' ? (r.hasSemi ? 16 : 8) : rd === 'Semifinal' ? 8 : null;
-        body = `<b>${jj(rd)}</b><p class="muted tiny">${rd === 'Final' ? 'Random partner, songs from the DJ, five judges.' : `${rd === 'Prelims' ? ev.field : 16} dancers, top ${cut} go through.`} Costs ${E.ROUND_ENERGY[rd]} energy to dance.${ef ? ` At ${S.energy} energy you're about ${ef}% below your best.` : ''}</p>
+        body = `<b>${jj(rd)}</b><p class="muted tiny">${rd === 'Final' ? 'Random partner, songs from the DJ, five judges.' : `${rd === 'Prelims' ? ev.field : 16} dancers, top ${cut} go through.`} Costs ${E.roundEnergy(S, sl)} energy${E.roundEnergyWhy(S, sl).length ? ` (${E.roundEnergyWhy(S, sl).join(', ')})` : ''} to dance.${ef ? ` At ${S.energy} energy you're about ${ef}% below your best.` : ''}</p>
           <button class="btn primary wide" data-round="1">${rd === 'Final' ? 'Draw your J&amp;J final partner' : 'Dance the ' + jj(rd)}</button>`;
       } else if (state === 'now') {
         const nx = wk.slots.slice(i + 1).find(x => x.round);
@@ -3473,7 +3688,7 @@ const screens = {
           <span class="t">${esc(o.title)}${star(o.stat && o.stat === focusNow())}</span><span class="c">${o.money ? '$' + o.money + ' · ' : ''}${o.energy < 0 ? '+' + (-o.energy) : o.energy ? '−' + o.energy : '±0'} energy</span>
           <span class="d">${esc(o.desc)}${o.teach !== undefined ? ` ${cap(teachLabel(o.teach).replace(/(<b[^>]*>)(\w)/, (m, t, c) => t + c.toUpperCase()))}.` : ''}${o.ok ? shortNote(o.money) : ` <b style="color:var(--bad)">${o.why}.</b>`}</span></button>`).join('')}</div>`;
       } else {
-        body = sl.round === 'Strictly' ? `<b>Strictly with ${esc(wk.strictly.entered.name)}</b>` : sl.round ? `<b>${jj(sl.round)}</b>` : `<span class="muted">${sl.wasRound ? 'Free (you’re out of the ' + jj(sl.wasRound) + ')' : sl.night ? 'Free · social night' : 'Free · workshops'}${sl.star ? ' · star workshop' : ''}${sl.priya ? N(' · {priya}’s final') : ''}${sl.offer ? ' · pro offer' : ''}${sl.strictly && E.strictlyOpen(S) ? ' · Strictly' : ''}</span>`;
+        body = sl.round === 'Strictly' ? `<b>${stLabel(wk.strictly)} Strictly with ${esc(wk.strictly.entered.name)}</b>` : sl.round ? `<b>${jj(sl.round)}</b>` : `<span class="muted">${sl.wasRound ? 'Free (you’re out of the ' + jj(sl.wasRound) + ')' : sl.night ? 'Free · social night' : 'Free · workshops'}${sl.star ? ' · star workshop' : ''}${sl.priya ? N(' · {priya}’s final') : ''}${sl.offer ? ' · pro offer' : ''}${sl.strictly && E.strictlyOpen(S) ? ' · Strictly' : ''}</span>`;
       }
       const row = `<li class="${state} ${sl.round ? 'round' : ''}"><span class="when">${sl.t}</span><div class="wb">${body}</div></li>`;
       if (i !== wk.awardsAt) return row;
@@ -3487,7 +3702,7 @@ const screens = {
     }).join('');
     return `${topbar()}
     <section class="block">
-      <p class="eyebrow">Tier ${ev.tier} · ${ev.div || 'Novice'} J&amp;J${wk.strictly ? ' + Strictly' : ''}${r.out ? ' · you’re out of the J&amp;J' : ''}</p>
+      <p class="eyebrow">Tier ${ev.tier} · ${ev.div || 'Novice'} J&amp;J${wk.strictly ? ` + ${stLabel(wk.strictly)} Strictly` : ''}${r.out ? ' · you’re out of the J&amp;J' : ''}</p>
       <h1>${esc(ev.name)}</h1>
       ${wk.news.length ? `<div class="news">${wk.news.map(n => `<div class="banner"><span class="chip ${n.tone || 'acc'}">${n.tag}</span><span>${esc(n.text)}</span></div>`).join('')}</div>` : ''}
       <p class="muted tiny">Visiting pro this weekend: ${esc(wk.pro.name)}, who teaches ${E.LABEL[wk.pro.topic].toLowerCase()}.</p>
@@ -3511,6 +3726,7 @@ const screens = {
       ${r.priya && S.priyaNews && S.priyaNews.week === S.week && S.priyaNews.season === seasonNo() ? `<p style="font-size:.86rem"><b>${N('{priya}')}:</b> ${esc(S.priyaNews.text.replace(/^[^:]+ at [^:]+: /, ''))}</p>` : ''}
       <p class="muted tiny">Includes a little Composure from competing and +${E.SC.event} community for showing up. You'll recover ${E.RECOVER} energy before Monday.</p>
     </section>
+    ${unlockCards(wk)}
     ${strictlySum(wk)}
     ${prankRecap(wk)}
     ${rivalWrap(r)}
@@ -3580,7 +3796,7 @@ const screens = {
     const tbl = (rd, role = S.role) => `<section class="block"><h2>${rd.name}</h2>
       <p class="muted tiny">Top ${rd.cut} of ${rd.size} called back (the line). Each judge marks Yes = ${v.Yes}, Alt1 = ${v.Alt1}, Alt2 = ${v.Alt2}, Alt3 = ${v.Alt3}, the WSDC values. A Yes beats two alternates, and you're in if your total is above the line. The Chief Judge breaks ties.</p>
       <div class="tablewrap"><table class="sheet"><thead><tr><th>Bib</th><th class="cp">${role}</th>${J.map(j => `<th title="${j.name}">${j.name.slice(0, 2)}</th>`).join('')}<th>Σ</th></tr></thead>
-      <tbody>${rd.sheet.map((x, i) => `<tr class="${x.me ? 'me' : x.priya ? 'pr' : ''}${i === rd.cut ? ' cutline' : ''}"><td class="pl">${x.bib}</td><td class="cp">${esc(x.name)}${x.rival ? '<span class="rtag">rival</span>' : ''}${x.priya ? '<span class="rtag friendly">practice partner</span>' : ''}${x.withdrew ? '<span class="rtag nem">withdrew</span>' : ''}${x.alt ? `<span class="rtag${x.in ? ' friendly' : ''}">${E.ordinal(x.alt)} alt${x.in ? ', in' : ''}</span>` : ''}</td>${x.marks.map(m => `<td class="mk-${m ? (m === 'Yes' ? 'yes' : 'alt') : 'no'}">${m}</td>`).join('')}<td class="r cnt">${x.sum}</td></tr>`).join('')}</tbody></table></div></section>`;
+      <tbody>${rd.sheet.map((x, i) => `<tr class="${x.me ? 'me' : x.priya ? 'pr' : ''}${i === rd.cut ? ' cutline' : ''}"><td class="pl">${x.bib}</td><td class="cp">${x.pair ? coupleWho({ lead: x.pair[0], follow: x.pair[1] }) : esc(x.name)}${x.rival ? '<span class="rtag">rival</span>' : ''}${x.priya ? '<span class="rtag friendly">practice partner</span>' : ''}${x.withdrew ? '<span class="rtag nem">withdrew</span>' : ''}${x.alt ? `<span class="rtag${x.in ? ' friendly' : ''}">${E.ordinal(x.alt)} alt${x.in ? ', in' : ''}</span>` : ''}</td>${x.marks.map(m => `<td class="mk-${m ? (m === 'Yes' ? 'yes' : 'alt') : 'no'}">${m}</td>`).join('')}<td class="r cnt">${x.sum}</td></tr>`).join('')}</tbody></table></div></section>`;
     // The other role's rounds, once they've been danced (they dance at the same time as yours).
     const other = S.role === 'Lead' ? 'Follows' : 'Leads', wk = S.wk && S.wk.res === r ? S.wk : null;
     const danced = name => !wk || wk.finished || wk.slots.findIndex(sl => sl.round === name || sl.wasRound === name) < wk.cur;
@@ -3653,7 +3869,7 @@ const SAVE_KEY = 'anchor-point-save';
 let saved = null; // a season found in storage, offered on the start screen
 function save() {
   if (!S) return;
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, S, V })); } catch (e) {}
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, ver: GAME_VER, S, V })); } catch (e) {}
 }
 function readSave() {
   try { const d = JSON.parse(localStorage.getItem(SAVE_KEY)); return d && d.v === 1 && validState(d) ? d : null; } catch (e) { return null; }
@@ -3662,13 +3878,14 @@ function clearSave() {
   saved = null;
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
 }
-const validState = d => !!(d && d.S && d.S.sc !== undefined && d.S.stats && d.S.stats.time !== undefined);
+// Saves carry the game version from v57 on. Older saves load if they're from v48 or later (they have the living
+// circuit, tracked rivals, the calendar and practice partners); anything older starts fresh (Steve, v57).
+const GAME_VER = 58;
+const validState = d => !!(d && d.S && d.S.sc !== undefined && d.S.stats && d.S.stats.time !== undefined && (d.ver >= 48 || (d.S.field && d.S.rivalry && d.S.cal && d.S.pals)));
 function loadGame(d) {
   S = d.S; if (!S.gear) S.gear = {};
-  S.season = S.season || 1; S.div = S.div || 'Novice'; // saves from before careers
   V = d.V || { screen: 'hub' }; if (!V.plan) V.plan = E.emptyPlan();
   if (!screens[V.screen] || V.screen === 'start') V.screen = 'hub';
-  if (V.screen === 'rivals') { V.screen = 'hub'; V.tab = 'rivals'; } // saves from before the tabs (v56)
   if (!V.tab) V.tab = 'week';
   if (V.screen === 'dance') V.screen = V.ev && V.ev.strictly ? 'stDraw' : 'draw'; // the animation can't resume halfway; replay it from the draw
   if (S.wk && V.ev) V.ev = S.wk.res;          // saving splits these into two copies; make them one object again
@@ -3707,7 +3924,7 @@ app.addEventListener('submit', e => {
   if (saved && !saved.S.done) { V.confirmNew = { name, role }; return render(); } // don't wipe a career in progress without asking
   newCareer(name, role);
 });
-function newCareer(name, role) { saved = null; S = E.newGame(name, role); newWeekPlan(); go('pickRival', { tone: 'friendly', label: null, labelOwn: '', tab: 'week', confirmNew: null, helpBack: null }); }
+function newCareer(name, role) { saved = null; S = E.newGame(name, role); newWeekPlan(); go('pickTrait', { tone: 'friendly', label: null, labelOwn: '', tab: 'week', confirmNew: null, helpBack: null }); }
 app.addEventListener('input', e => { if (e.target.id === 'rivalLabel') V.labelOwn = e.target.value; });
 // Remember which fold-away sections are open. 'toggle' doesn't bubble, so listen in the capture phase.
 app.addEventListener('toggle', e => {
@@ -3750,6 +3967,7 @@ app.addEventListener('click', e => {
   if (d.promodone) { S.moved.seen = true; return V.promoBack === 'event' ? afterEvent() : go(V.promoBack === 'eventIntro' ? 'eventIntro' : 'hub', { tab: 'week' }); }
   if (d.slot) return setSlot(d.slot, d.val);
   if (d.buy) { E.buyGear(S, d.buy); return render(); }
+  if (d.unlocklater) { V.unlockLater = { ...(V.unlockLater || {}), [d.unlocklater]: true }; return render(); }
   if (d.stand) { E.buyStand(S, d.stand); return render(); }
   if (d.evt) { E.answerEvent(S, d.evt === 'yes'); return render(); }
   if (d.same) { V.plan = E.sanitizePlan(S, S.lastPlan); return render(); }
@@ -3758,6 +3976,7 @@ app.addEventListener('click', e => {
   if (d.next) return afterWeek();
   if (d.register) { const ev = E.eventAt(S, S.week); E.startEvent(S, { single: !!V.single && ev.travel !== 'home' }); V.single = false; V.ev = S.wk.res; V.review = null; return go('weekend'); }
   if (d.pick) { E.chooseSlot(S, d.pick); return render(); }
+  if (d.trait) { const k = S.traitOffer && S.traitOffer.kind; E.pickTrait(S, d.trait); return k === 'innate' ? go('pickRival') : render(); }
   if (d.strictly) { E.enterStrictly(S, d.strictly); return render(); }
   if (d.strictlyno) { V.strictlyNo = E.absWeek(S); return render(); }
   if (d.strictlysee) return go('strictly');
