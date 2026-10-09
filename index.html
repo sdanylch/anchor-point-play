@@ -1291,13 +1291,15 @@ const Engine = (() => {
   // not a lesser kind: the record counts the same.
   // Steve's pace rule: you're the one working hardest. A rival can start ahead, but never improves faster than you:
   // since you started tracking them, a rival has gained at most `pace` × what you gained (and no more than their
-  // own natural pace allows). So the main rival starts a step ahead and you catch them; nobody pulls away from you.
+  // own natural pace allows). So the main rival starts ahead and you catch them; nobody pulls away from you.
+  // v58 (Steve): the main rival starts well ahead, usually moves up to Intermediate first (at RIVAL_MAIN_OUT), and
+  // stays in Intermediate until the career ends, so you catch and beat them there (around early season 3).
   const RIVAL_TYPES = {
-    main: { pace: .78, rate: 1.6 },     // your main rival: a step ahead at the start, you catch them around week 12
+    main: { pace: .85, rate: 1.8 },     // your main rival: well ahead at the start, you catch them in Intermediate
     veteran: { pace: .65, rate: 1.4 },  // a later rival who's ahead of you: ahead but slower
     mirror: { pace: .95, rate: 1.8 },   // a later rival about your level: about your pace
   };
-  const RIVAL_AHEAD = 9, RIVAL_MAX = 3, RIVAL_OUT = { Novice: 96, Intermediate: 130 }; // rivals move up about when you would
+  const RIVAL_AHEAD = 16, RIVAL_MAIN_OUT = 82, RIVAL_MAX = 3, RIVAL_OUT = { Novice: 96, Intermediate: 130 }; // rivals move up about when you would
   const mySkill = s => weighted(s.stats, PRELIM_W);
   const skillOf = d => weighted(dancerStats(d), PRELIM_W);
   const activeRivals = s => (s.field || []).filter(d => d.rival && s.rivalry && s.rivalry[d.id]);
@@ -1307,7 +1309,7 @@ const Engine = (() => {
     d.nat = A - (A - d.nat) * Math.pow(1 - POP.gain * T.rate / LV.span, weeks); // where their own pace would take them
     d.skill = r1(Math.max(d.skill, Math.min(d.nat, d.base + T.pace * Math.max(0, me - d.meBase))));
     // You move up on points, they move up on skill: a rival who's behind you in your own division waits until you've gone.
-    while (POP[d.div] && d.skill >= d.out && !(d.div === (s.div || 'Novice') && skillOf(d) < mySkill(s))) {
+    while (POP[d.div] && d.skill >= d.out && !(d.type === 'main' && d.div === 'Intermediate') && !(d.div === (s.div || 'Novice') && skillOf(d) < mySkill(s))) {
       d.div = NEXT_DIV[d.div]; d.moved = { season: s.season || 1, week: s.week };
       d.out = POP[d.div] ? r1((RIVAL_OUT[d.div] || 999) + gauss() * 3) : 999;
       const R = s.rivalry && s.rivalry[d.id];
@@ -1477,13 +1479,13 @@ const Engine = (() => {
     if (s.attend[key] === undefined) s.attend[key] = rivalSay(R, 'pre', { ev: evShort(ev.name), k: R.meets.length + 1 });
     return s.attend[key];
   }
-  // Three people from your home community to pick your main rival from: Novices a step ahead of you.
+  // Three people from your home community to pick your main rival from: Novices well ahead of you.
   function makeCandidates(s) {
     s.cands = []; const used = new Set();
     const most = s.role === 'Follow' ? 'w' : 'm', gs = shuffle([most, most, most === 'm' ? 'w' : 'm']); // Steve (v48): two of the three share your gender lean
     for (let i = 0; i < 3; i++) {
       const d = newDancer(nextId(s, 'field'), uniqueName(s.field, undefined, gs[i]), 'Novice', 0); d.g = gs[i];
-      d.skill = r1(mySkill(s) + RIVAL_AHEAD + gauss() * 1.5 - weighted(d.off, PRELIM_W)); // a step ahead of you, all told
+      d.skill = r1(mySkill(s) + RIVAL_AHEAD + gauss() * 1.5 - weighted(d.off, PRELIM_W)); // well ahead of you, all told
       d.line = colourLine(s, d, used); s.field.push(d); s.cands.push(d.id);
     }
   }
@@ -1493,7 +1495,7 @@ const Engine = (() => {
     s.rivalry = s.rivalry || {};
     d.rival = true; d.type = main ? 'main' : skillOf(d) - mySkill(s) > 6 ? 'veteran' : 'mirror';
     Object.assign(d, { nat: d.skill, base: d.skill, meBase: mySkill(s) }); // the pace rule counts from today
-    if (POP[d.div]) d.out = r1(Math.max(d.out, d.skill + 6, (RIVAL_OUT[d.div] || 0) + gauss() * 3));
+    if (POP[d.div]) d.out = main && d.div === 'Novice' ? r1(RIVAL_MAIN_OUT + gauss() * 3) : r1(Math.max(d.out, d.skill + 6, (RIVAL_OUT[d.div] || 0) + gauss() * 3));
     const old = s.rivalry[id] || { w: 0, l: 0, meets: [] };
     const t = tone === 'friendly' ? 'friendly' : 'rival', lab = String(label || '').trim().slice(0, 30) || pick(RIVALRY[t]);
     s.rivalry[id] = { ...old, name: d.name, main: !!main, tone: t, label: lab, type: d.type, since: { season: s.season || 1, week: s.week, div: d.div }, ahead: skillOf(d) > mySkill(s), former: null, ...(d.line ? { line: d.line } : {}) };
@@ -1567,8 +1569,9 @@ const Engine = (() => {
       m.miles = [won && R.w === 1 && ms('firstWin'), streak(true) && ms('won3'), streak(false) && ms('lost3')].filter(Boolean);
       out.push({ id: r.id, name: r.name, main: R.main, ...m });
     });
-    // Rivals who started ahead of you: the weekend you catch them.
-    activeRivals(s).forEach(d => { const R = s.rivalry[d.id]; if (R.ahead && !(R.moments || []).some(x => x.kind === 'passed') && d.div === (s.div || 'Novice') && skillOf(d) < mySkill(s)) { const t = milestone(s, R, 'passed'); if (t) (res.rivalMiles = res.rivalMiles || []).push({ text: t, name: R.name }); } });
+    // Rivals who started ahead of you: the weekend you catch them. Only when you also beat them there (Steve, v58:
+    // never "you've caught me" on a weekend they finished ahead of you).
+    activeRivals(s).forEach(d => { const R = s.rivalry[d.id], here = out.find(x => x.id === d.id); if (R.ahead && here && here.won && !(R.moments || []).some(x => x.kind === 'passed') && d.div === (s.div || 'Novice') && skillOf(d) < mySkill(s)) { const t = milestone(s, R, 'passed'); if (t) (res.rivalMiles = res.rivalMiles || []).push({ text: t, name: R.name }); } });
     // Just ahead: up to three places above you in the last round you danced.
     const ids = {}; res.rivals.forEach(r => ids[r.bib] = r);
     let above = [];
@@ -2059,7 +2062,9 @@ const Engine = (() => {
     const tagTeach = (src, st) => { Object.assign(o[o.length - 1], { teach: teach(s.stats[st], levelOf(s, src, st)), stat: st }); };
     const fri = sl.t === 'Fri night'; // arrival night: you only just got in, so it's a shorter night
     const sun = sl.t === 'Sun night'; // the last dance of the weekend: spend whatever energy you saved
-    if (sl.night) opt('social', fri ? 'Arrival night social' : sun ? 'Sunday night social' : 'Late-night social',
+    const finals = sl.night && sl.wasRound === 'Final' && wk.slots[i + 1] && wk.slots[i + 1].t === 'Sat late night';
+    if (finals) opt('watchFinal', 'Watch the J&J finals', `You\u2019re out, but nobody misses the finals: the whole ballroom watches, and you cheer your people. A little Musicality or Composure, community +4. The late-night social is after.`, 0, WK.watch.energy);
+    else if (sl.night) opt('social', fri ? 'Arrival night social' : sun ? 'Sunday night social' : 'Late-night social',
       fri ? `A shorter night as people get in. Connection, musicality, timing, community +6, and a few faces you might draw in a final.`
         : sun ? `The last dance of the weekend, and often the best. Connection, musicality, timing, community +6, and faces you\u2019ll see (and might draw) at the next event.`
         : `The die-hards stay late: you\u2019ll dance with 4 ${s.role === 'Lead' ? 'follows' : 'leads'}, and the die-hards often make the final. Connection, musicality, timing, community +6.`,
@@ -2117,6 +2122,7 @@ const Engine = (() => {
     }
     else if (optId === 'cheer') { sc = 5; note = 'Your voice is gone. Your community noticed.'; }
     else if (optId === 'cheerPriya') { const before = s.chem; sc = 8; s.chem = Math.min(3, s.chem + 1); note = named(s, '{priya} found you in the crowd after.' + (s.chem > before ? ' Chemistry up.' : '')); }
+    else if (optId === 'watchFinal') { add(rnd() < .5 ? 'mus' : 'comp', 1, true); sc = 4; note = 'The finals were electric. You know half the couples now, and you screamed for all of them.'; }
     else if (optId === 'watch') { add(rnd() < .5 ? 'mus' : 'comp', 1, true); note = 'The All-Star final was unreal.'; }
     else if (optId === 'prank') {
       wk.pranked = true; sc = 3;
@@ -2287,6 +2293,23 @@ const Engine = (() => {
     res.prize = res.prizePass ? 0 : pz;
     res.pending = true; // points and prizes are handed out at the awards ceremony (Steve, v57)
   }
+  // Your division's final when you weren't in it (Steve, v58): judged like any final, so the awards read out the
+  // podium and the scoresheet goes up. `res.watch` (not `res.table`, which means you were in it).
+  function finalWatch(s, res) {
+    if (res.madeFinal || res.watch || !res.pool || !res.partners) return;
+    let pool = res.pool.filter(c => !c.isPlayer);
+    if (pool.length > 8) pool = pool.map(c => ({ c, v: weighted(c.stats, PRELIM_W) + gauss() * 4 })).sort((a, b) => b.v - a.v).slice(0, 8).map(x => x.c); // the rounds you missed
+    const partners = shuffle([...res.partners]), songs = songSet(res.semi && res.semi.songs), w = {};
+    STATS.forEach(k => w[k] = songs.reduce((a, so) => a + songW(so)[k], 0) / songs.length);
+    const couples = pool.filter((a, i) => partners[i]).map((a, i) => { const b = partners[i], st = coupleStats(a, b); return { a, b, stats: st, base: weighted(st, w) }; });
+    if (couples.length < 3) return;
+    const fm = {}; STATS.forEach(k => fm[k] = couples.reduce((acc, c) => acc + c.stats[k], 0) / couples.length);
+    const { ranks, order } = judgeCouples(couples, [], fm, 1, res.spotlight ? JUDGING.spot : JUDGING.floor);
+    const who = d => ({ name: d.name, bib: d.bib, rival: !!d.rival, ...(d.priya ? { priya: true } : {}) });
+    res.watch = order.map((i, k) => { const c = couples[i], lead = s.role === 'Lead' ? c.a : c.b, follow = s.role === 'Lead' ? c.b : c.a;
+      return { place: k + 1, ranks: ranks[i], why: order.why[i], lead: who(lead), follow: who(follow) }; });
+    res.winners = { lead: res.watch[0].lead.name, follow: res.watch[0].follow.name };
+  }
   // Awards ceremony (Steve, v57): Sunday evening, before the last social, at every event. Final placings are read
   // out here (J&J, then the Strictly); points, prize money and a Strictly win's motivation land here. Not a slot.
   const awardsDue = s => { const wk = s.wk; return !!wk && wk.awardsAt >= 0 && !wk.awarded && wk.cur >= wk.awardsAt; };
@@ -2298,11 +2321,7 @@ const Engine = (() => {
       if (res.prizePass) s.passes = (s.passes || 0) + 1;
       s.money += res.prize; s.winnings = (s.winnings || 0) + res.prize;
     }
-    if (!res.madeFinal && !res.winners && res.pool && res.partners) { // who won your division (you weren't in the final)
-      const top = l => l.map(c => ({ c, v: weighted(c.stats, PRELIM_W) + gauss() * 4 })).sort((a, b) => b.v - a.v)[0];
-      const a = top(res.pool.filter(c => !c.isPlayer)), b = top(res.partners);
-      if (a && b) res.winners = { lead: (s.role === 'Lead' ? a : b).c.name, follow: (s.role === 'Lead' ? b : a).c.name };
-    }
+    finalWatch(s, res);
     strictlyWatch(s);
     const r = wk.strictly && wk.strictly.result;
     if (r && r.pending) {
@@ -2820,7 +2839,7 @@ function helpRules() {
       <li><b>Finals</b> are a random partner and random songs. You don't pick the moves: the + and − moments show whether your training holds up. Anyone you dance with at a social or in a heat could be your partner in a final, and it helps to know them. Placings (and points and prizes) are read out at the awards ceremony on Sunday evening.</li>
       <li><b>Traits:</b> you pick a habit when you start and a signature move when you move up to Intermediate. Each has an upside and a catch; they're on your dancer card, and options say when one is at work.</li>
       <li><b>Strictly:</b> at bigger events (not Tier 1) there's a Strictly on Sunday, where you choose your partner: ${N('{priya}')} once your chemistry is full, or someone you've danced with enough that they're open to it (you'll hear when they are). You pay half the entry and split the prize. No WSDC points.</li>
-      <li><b>Rivals:</b> your main rival starts a step ahead of you. At every event you both dance, whoever gets further wins the head-to-head. Others suggest themselves (up to ${E.RIVAL_MAX} at a time), and they follow you up the divisions.</li>
+      <li><b>Rivals:</b> your main rival starts well ahead of you and usually reaches Intermediate first. At every event you both dance, whoever gets further wins the head-to-head. Others suggest themselves (up to ${E.RIVAL_MAX} at a time), and they follow you up the divisions.</li>
       <li><b>The circuit is alive.</b> Everyone improves, the best move up, and newcomers join. Early on a Novice final is a lucky break. Moving up a division puts you back near the bottom.</li>
       <li><b>Enjoy the ride.</b> In real life, pointing out of Novice often takes years. The dancing along the way is the good part.</li>
     </ul>`;
@@ -3321,7 +3340,7 @@ const screens = {
     return `<div class="start">
       <p class="eyebrow">Before your first season</p>
       <h1>Pick your rival</h1>
-      <p class="lede">Every dancer has one. Here are three ${S.role.toLowerCase()}s from your home community, all Novices a step ahead of you. Your rival will be at your local events and most of the others. Do you think you can catch them?</p>
+      <p class="lede">Every dancer has one. Here are three ${S.role.toLowerCase()}s from your home community, all Novices well ahead of you. Your rival will be at your local events and most of the others, and will probably reach Intermediate before you do. Do you think you can catch them?</p>
       <section class="block"><h2>1. What kind of rivalry?</h2>
         <div class="choices">${choice('tone', 'friendly', 'Friendly', tone === 'friendly')}${choice('tone', 'rival', 'Bad blood', tone === 'rival')}</div>
         <p class="hint">Friendly rivals cheer each other on and sometimes share a hotel room. Bad blood is… bad blood. The head-to-head counts the same either way.</p></section>
@@ -3560,6 +3579,7 @@ const screens = {
     const jj = r.madeFinal ? `<section class="block"><h2>${r.ev.div || 'Novice'} Jack &amp; Jill</h2>${list(r.table)}
         <p class="aw-after" style="--d:${d()}s;margin-top:10px">${r.place <= 3 ? `<b>You placed ${E.ordinal(r.place)}!</b>${r.points ? ` +${r.points} point${r.points > 1 ? 's' : ''}` : ''}${r.prize ? `, $${r.prize} prize` : r.prizePass ? ', and a free pass to a future event' : ''}.` : `Not on the podium this time. The scoresheets are up: see where you placed.`}</p>
 </section>`
+      : r.watch ? `<section class="block"><h2>${r.ev.div || 'Novice'} Jack &amp; Jill</h2>${list(r.watch)}<p class="aw-after" style="--d:${d()}s;margin-top:10px">You cheered from the crowd. The scoresheet is up.</p></section>`
       : `<section class="block"><h2>${r.ev.div || 'Novice'} Jack &amp; Jill</h2><p>${r.winners ? `The winners: <b>${esc(r.winners.lead)} &amp; ${esc(r.winners.follow)}</b>. ` : ''}You cheered from the crowd.</p></section>`;
     const st = wk.strictly && wk.strictly.result;
     const sx = st && st.done ? (st.out ? '' : `<section class="block"><h2>${esc(st.label)} Strictly</h2>${list(st.table)}
@@ -3730,7 +3750,7 @@ const screens = {
     ${strictlySum(wk)}
     ${prankRecap(wk)}
     ${rivalWrap(r)}
-    ${r.rounds.some(x => x.sheet) || r.table || (wk.strictly && (wk.strictly.result || wk.strictly.watch)) ? `<button class="btn wide" data-sheets="1">See the scoresheets</button>` : ''}
+    ${r.rounds.some(x => x.sheet) || r.table || r.watch || (wk.strictly && (wk.strictly.result || wk.strictly.watch)) ? `<button class="btn wide" data-sheets="1">See the scoresheets</button>` : ''}
     ${reviewBlock()}
     <button class="btn primary wide" data-evdone="1">${S.done ? 'Career wrap-up' : S.seasonDone ? 'Season wrap-up' : 'Back to training'}</button>`;
   },
@@ -3775,7 +3795,7 @@ const screens = {
       `Send your video to the coach. The two-week focus on what went wrong is worth the $${E.REVIEW.coach}.`,
     ])}
     ${sec('Rivals', [
-      `Your main rival starts a step ahead of you. Keep training and you'll usually catch them partway through your first season.`,
+      `Your main rival starts well ahead of you and will probably reach Intermediate first. Keep training: you'll catch them there.`,
       `The head-to-head counts every event where you both dance the same division: whoever gets further wins it. A rival in another division doesn't count, but you'll hear how they did.`,
       `Someone who keeps finishing just ahead of you gets suggested as a rival. Track up to ${E.RIVAL_MAX}. Stop tracking anyone from the rivals screen: their record stays under Former rivals.`,
       `Friendly or bad blood, the record counts the same. Your rivalry's description (Grudge match, Hype buddy, or your own) sets the tone of the headlines and gossip. Change it any time on the rivals screen.`,
@@ -3809,6 +3829,7 @@ const screens = {
     <p class="muted" style="font-size:.86rem">Judges: ${J.map(j => j.name).join(', ')}.</p>
     ${r.rounds.filter(x => x.sheet).map(tbl).join('')}
     ${oSheets.length ? `<p class="eyebrow" style="margin-top:8px">${other}${r.priyaHere ? N(' ({priya} danced this one)') : ''}</p>${oSheets.map(rd => tbl({ ...rd, name: `${other}: ${rd.name}` }, other.slice(0, -1))).join('')}` : ''}
+    ${told && !r.table && r.watch ? finalSheet(`${r.ev.div || 'Novice'} J&amp;J final`, r.watch, '<p class="muted tiny">You weren\u2019t in this one. Relative placement: a place goes to the couple with a majority (3 of 5) of judges at that rank or better.</p>') : ''}
     ${told && r.table ? finalSheet(`${r.ev.div || 'Novice'} J&amp;J final`, r.table, `<p class="muted tiny">Relative placement: a place goes to the couple with a majority (3 of 5) of judges at that rank or better. <button class="linkbtn" data-results="1">Judges' notes</button></p>`) : ''}
     ${sx ? `<p class="eyebrow" style="margin-top:8px">${esc(sx.label)} Strictly${sx.mine ? '' : ' (you watched this one)'}</p>
       ${sx.prelim ? tbl({ ...sx.prelim, name: 'Strictly prelims' }, 'Couple') : ''}${sx.table ? finalSheet('Strictly final', sx.table) : ''}` : ''}
